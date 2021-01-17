@@ -4,11 +4,14 @@ import pandas as pd
 import xarray as xr
 import oggm
 from oggm.core.massbalance import MassBalanceModel
+import os
+import netCDF4
+import datetime
+import warnings
+from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH
 
-
-
-from scipy.interpolate import interp1d
-from scipy import optimize as optimization
+#from scipy.interpolate import interp1d
+#from scipy import optimize as optimization
 # Locals
 from oggm.utils import (SuperclassMeta, lazy_property, floatyear_to_date,
                         date_to_floatyear, monthly_timeseries, ncDataset,
@@ -19,7 +22,27 @@ import scipy.stats as stats
 
 
 import warnings
-from oggm.shop.ecmwf import *
+from oggm.shop.ecmwf import set_ecmwf_url, get_ecmwf_file, BASENAMES
+from oggm.utils._funcs import haversine
+
+
+import logging
+
+# Optional libs
+try:
+    import salem
+except ImportError:
+    pass
+
+# Locals
+from oggm import cfg
+from oggm import utils
+from oggm import entity_task
+
+# Module logger
+log = logging.getLogger(__name__)
+
+ECMWF_SERVER = 'https://cluster.klima.uni-bremen.de/~oggm/climate/'
 
 
 # %%
@@ -31,12 +54,173 @@ BASENAMES['ERA5_daily'] =   {
         'tmp':'era5/daily/v1.0/era5_daily_t2m_1979-2018_flat.nc'
         # only glacier-relevant gridpoints included!
         }
-@entity_task(log, writes=['climate_historical'])
-def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix=None,
+
+# this could be used in general
+def write_climate_file(gdir, time, prcp, temp,
+                               ref_pix_hgt, ref_pix_lon, ref_pix_lat, #*,
+                               gradient=None,
+                               temp_std=None,
+                               time_unit=None,
+                               calendar=None,
+                               source=None,
+                               file_name='climate_historical',
+                               filesuffix=''):
+    """Creates a netCDF4 file with climate data timeseries.
+
+    Parameters
+    ----------
+    gdir:
+        glacier directory
+    time : ndarray
+        the time array, in a format understood by netCDF4
+    prcp : ndarray
+        the precipitation array (unit: 'kg m-2 month-1')
+    temp : ndarray
+        the temperature array (unit: 'degC')
+    ref_pix_hgt : float
+        the elevation of the dataset's reference altitude
+        (for correction). In practice it is the same altitude as the
+        baseline climate.
+    ref_pix_lon : float
+        the location of the gridded data's grid point
+    ref_pix_lat : float
+        the location of the gridded data's grid point
+    gradient : ndarray, optional
+        whether to use a time varying gradient
+    temp_std : ndarray, optional
+        the daily standard deviation of temperature (useful for PyGEM)
+    time_unit : str
+        the reference time unit for your time array. This should be chosen
+        depending on the length of your data. The default is to choose
+        it ourselves based on the starting year.
+    calendar : str
+        If you use an exotic calendar (e.g. 'noleap')
+    source : str
+        the climate data source (required)
+    file_name : str
+        How to name the file
+    filesuffix : str
+        Apply a suffix to the file
+    """
+
+    if source =='ERA5_daily' and filesuffix =='':
+        raise InvalidParamsError('filesuffix should be "_daily" as only \
+                                 file_name climate_historical is normally \
+                                     monthly data')
+    # overwrite is default
+    fpath = gdir.get_filepath(file_name, filesuffix=filesuffix)
+    if os.path.exists(fpath):
+        os.remove(fpath)
+
+    if source is None:
+        raise InvalidParamsError('`source` kwarg is required')
+
+    zlib = cfg.PARAMS['compress_climate_netcdf']
+
+    try:
+        y0 = time[0].year
+        y1 = time[-1].year
+    except AttributeError:
+        time = pd.DatetimeIndex(time)
+        y0 = time[0].year
+        y1 = time[-1].year
+    
+    if time_unit is None:
+        # http://pandas.pydata.org/pandas-docs/stable/timeseries.html
+        # #timestamp-limitations
+        if y0 > 1800:
+            time_unit = 'days since 1801-01-01 00:00:00'
+        elif y0 >= 0:
+            time_unit = ('days since {:04d}-01-01 '
+                         '00:00:00'.format(time[0].year))
+        else:
+            raise InvalidParamsError('Time format not supported')
+
+    with ncDataset(fpath, 'w', format='NETCDF4') as nc:
+        nc.ref_hgt = ref_pix_hgt
+        nc.ref_pix_lon = ref_pix_lon
+        nc.ref_pix_lat = ref_pix_lat
+        nc.ref_pix_dis = haversine(gdir.cenlon, gdir.cenlat,
+                                   ref_pix_lon, ref_pix_lat)
+        nc.climate_source = source
+        nc.hydro_yr_0 = y0 + 1
+        nc.hydro_yr_1 = y1
+
+        nc.createDimension('time', None)
+
+        nc.author = 'OGGM'
+        nc.author_info = 'Open Global Glacier Model'
+
+        timev = nc.createVariable('time', 'i4', ('time',))
+        
+        tatts = {'units': time_unit}
+        if calendar is None:
+            calendar = 'standard'
+
+        tatts['calendar'] = calendar
+        try:
+            numdate = netCDF4.date2num([t for t in time], time_unit,
+                                       calendar=calendar)
+        except TypeError:
+            # numpy's broken datetime only works for us precision
+            time = time.astype('M8[us]').astype(datetime.datetime)
+            numdate = netCDF4.date2num(time, time_unit, calendar=calendar)
+
+        timev.setncatts(tatts)
+        timev[:] = numdate
+
+        v = nc.createVariable('prcp', 'f4', ('time',), zlib=zlib)
+        v.units = 'kg m-2'
+        #### this could be made more beautriful 
+        if len(prcp) >(y1-y0)*30*12: # just rough estimate
+            v.long_name = 'total daily precipitation amount, assumed same for each day of month'
+        elif len(prcp)==(y1-y0)*12:
+            v.long_name = 'total monthly precipitation amount'
+        else:
+            v.long_name = 'total monthly precipitation amount'
+            import warnings
+            warnings.warn("there might be a conflict in the prcp timeseries,"
+                         "please check!")
+
+        v[:] = prcp
+
+        v = nc.createVariable('temp', 'f4', ('time',), zlib=zlib)
+        v.units = 'degC'
+        if source=='ERA5_daily' and len(temp)>(y1-y0)*30*12:   
+            v.long_name = '2m daily temperature at height ref_hgt'
+        elif source=='ERA5_daily' and len(temp)<=(y1-y0)*30*12:  
+            raise InvalidParamsError('if the climate dataset (here source)\
+                                     is ERA5_daily, temperatures should be in\
+                                         daily resolution, please check or\
+                                             set source to another climate\
+                                                 dataset')
+        else:
+            v.long_name = '2m monthly temperature at height ref_hgt'
+
+        v[:] = temp
+
+        if gradient is not None:
+            v = nc.createVariable('gradient', 'f4', ('time',), zlib=zlib)
+            v.units = 'degC m-1'
+            v.long_name = ('temperature gradient from local regression or'
+                           'lapserates')
+            v[:] = gradient
+
+        if temp_std is not None:
+            v = nc.createVariable('temp_std', 'f4', ('time',), zlib=zlib)
+            v.units = 'degC'
+            v.long_name = 'standard deviation of daily temperatures'
+            v[:] = temp_std
+
+
+
+@entity_task(log, writes=['climate_historical_daily'])
+def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
                             cluster = False, hydro_month_nh = 10,
                              hydro_month_sh = 4):
     """Processes and writes the era5 daily baseline climate data for a glacier.
-
+    into climate_historical_daily.nc
+    
     Extracts the nearest timeseries and writes everything to a NetCDF file.
     This uses only the ERA5 daily temperatures. The precipitation, lapse
     rate and standard deviations are used from ERA5dr. 
@@ -67,7 +251,9 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix=None,
     """
 
 
+    # era5daily only for temperature
     dataset = 'ERA5_daily'
+    # for the other variables use the data of ERA5dr
     dataset_othervars = 'ERA5dr'
 
     # get the central longitude/latidudes of the glacier
@@ -131,15 +317,12 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix=None,
         # if default settings: this is the last day in March or September
         end_day = int(ds.sel(time='{}-{:02d}'.format(y1, em)).time.dt.daysinmonth[-1].values)
             
-        
-
-            
         # if other hydro_month need to adapt this!!!
         ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
                                '{}-{:02d}-{}'.format(y1, em, end_day)))
         
         try:
-            # computing all the distances and chooses the nearest gridpoint
+            # computing all the distances and choose the nearest gridpoint
             c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2 
             ds = ds.isel(points=c.argmin())
         except ValueError: #I turned this around
@@ -202,7 +385,7 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix=None,
             # this should not occur
             ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
             
-        G = 9.80665
+        G = cfg.G # 9.80665
         hgt = ds['z'].data / G
 
     gradient = None
@@ -234,14 +417,14 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix=None,
 
 
     # OK, ready to write
-    gdir.write_monthly_climate_file(time, prcp, temp, hgt, ref_lon, ref_lat,
+    write_climate_file(gdir, time, prcp, temp, hgt, ref_lon, ref_lat,
                                     filesuffix=output_filesuffix,
                                     gradient=gradient,
                                     temp_std=temp_std,
-                                    source=dataset)
-    # ATTENTION, I changed some stuff in the write_monthly_climate_file in 
-    # order that the attributes of precipitation are right (it is not anymore
-    # precpitation per month, but per day ... )
+                                    source=dataset,
+                                    file_name='climate_historical')
+    # This is now a new function, which could also work for other climates
+    # but is used, so far, only for ERA5_daily as source dataset ..
         
 
 
@@ -253,14 +436,14 @@ class mb_modules(MassBalanceModel):
 
     def __init__(self, gdir, mu_star, bias = 0, 
                  mb_type ='mb_daily', N=10000, loop = False,
-                 grad_type = 'cte', filename='climate_historical',
+                 grad_type = 'cte', filename=None,
                  input_filesuffix='',
                  repeat=False, ys=None, ye=None, 
                  t_solid = 0, t_liq =2, t_melt = 0, prcp_fac = 2.5,
                  default_grad = -0.0065, 
                  temp_local_gradient_bounds = [-0.009, -0.003],
-                 rho = 900,
-                 SEC_IN_YEAR = 31536000, SEC_IN_MONTH = 2628000 
+                 SEC_IN_YEAR = SEC_IN_YEAR,
+                 SEC_IN_MONTH = SEC_IN_MONTH
                  ):
         """ Initialize.
         Parameters
@@ -298,7 +481,8 @@ class mb_modules(MassBalanceModel):
             'var' (varies spatially & temporally as in the climate files)
         filename : str, optional
             set to a different BASENAME if you want to use alternative climate
-            data.
+            data, if None, it is set to default climate_historical
+            or climate_historical_daily for ERA5_daily
         input_filesuffix : str, 
             the file suffix of the input climate file
         repeat : bool
@@ -329,14 +513,11 @@ class mb_modules(MassBalanceModel):
             if grad_type != cte and the lapse rate does not lie in this range, 
             set it instead to these minimum, maximum gradients
             (default: [-0.009, -0.003] m/K)
-        rho: float
-            ice density in kg/m³ (default: 900)
         SEC_IN_YEAR: float
             seconds in a year (default: 31536000s),
-            actually this should not be changed, maybe this could be changed
+            maybe this could be changed
         SEC_IN_MONTH: float
             seconds in a month (default: 2628000s),
-            actually this should not be changed, 
             maybe this could be changed as not each 
             month has the same amount of seconds, 
             in February can be a difference of 8%
@@ -361,7 +542,8 @@ class mb_modules(MassBalanceModel):
         self.mb_type = mb_type
         self.loop = loop
         self.grad_type = grad_type
-        self.rho = rho
+        # defaul rho is 900  kg/m3     
+        self.rho = cfg.PARAMS['ice_density']
         
 
         # Public attrs
@@ -396,8 +578,18 @@ class mb_modules(MassBalanceModel):
             raise InvalidParamsError(text) 
          
 
-        
-
+        filename = 'climate_historical'
+        #if filename==None:
+        if baseline_climate =='ERA5_daily':
+            input_filesuffix = '_daily'
+            # could instead change the filename, but then I have to other stuff too
+            #    filename = 'climate_historical_daily'
+                #_doc = 'The historical daily climate timeseries stored in a netCDF file. \
+                #    (only temperature is really daily, precipitation is just assumed constant\
+                #     for every day)'
+                #cfg.BASENAMES['climate_historical_daily'] = ('climate_historical_daily.nc', _doc)
+            #else:
+            #    filename = 'climate_historical'
 
         # Read climate file
         fpath = gdir.get_filepath(filename, filesuffix=input_filesuffix)
@@ -634,7 +826,6 @@ class mb_modules(MassBalanceModel):
     # (e.g. in climate.py), I have to change this again and remove the self...
     # and somehow there is aproblem if I put not self in 
     #_get_tempformelt when it is inside the class
-    
     def _get_tempformelt(self, temp, pok):
         """ Helper function to compute tempformelt to avoid code duplication
         in get_monthly_climate() and _get2d_annual_climate() 
@@ -683,7 +874,7 @@ class mb_modules(MassBalanceModel):
                 z_std = np.matmul(np.atleast_2d(z_scores_mean).T,
                                   np.atleast_2d(itemp_std))
                 for h in np.arange(0, np.shape(tempformelt_without_std)[0]):
-                    h_tempformelt_daily =  z_std + np.atleast_2d(tempformelt_without_std[h,:]) #self.temp_std
+                    h_tempformelt_daily =  z_std + np.atleast_2d(tempformelt_without_std[h,:]) 
                     clip_min(h_tempformelt_daily,0,out=h_tempformelt_daily)
                     h_tempformelt_monthly = h_tempformelt_daily.mean(axis=0) 
                     tempformelt_with_std[h,:]  = h_tempformelt_monthly  
@@ -731,10 +922,7 @@ class mb_modules(MassBalanceModel):
             # to have the same unit of mu_star, which is 
             # the monthly temperature sensitivity (kg /m² /mth /K),
             mb_daily = prcpsol - self.mu_star * temp2dformelt * fact
-            #pd_2 = pd.DataFrame(mb_daily)
-            #pok = np.where(self.years == year)[0]
-            #pd_2 = pd_2.groupby(by=self.months[pok], axis = 1).sum()
-            #mb_month = pd_2.values
+
             mb_month = np.sum(mb_daily, axis =1 )
             # more correct than using a mean value for days in a month
             warnings.warn('get_monthly_mb has not been tested enough, there might be a problem'

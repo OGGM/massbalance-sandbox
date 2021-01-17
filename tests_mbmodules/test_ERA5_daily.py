@@ -17,7 +17,7 @@ import pytest
 # Local imports
 import oggm
 import xarray as xr
-from oggm import utils, workflow
+from oggm import utils, workflow, cfg
 from oggm.core import gcm_climate, climate, inversion, centerlines
 
 from oggm.tests.funcs import get_test_dir
@@ -31,13 +31,14 @@ from oggm.core.flowline import (FluxBasedModel, FlowlineModel,
                                 flowline_from_dataset, FileModel,
                                 run_constant_climate, run_random_climate,
                                 run_from_climate_data)
-from oggm.utils._workflow import *
+# from oggm.utils._workflow import *
 
 from oggm.exceptions import InvalidWorkflowError, InvalidParamsError
+# from oggm.cfg import cfg
+from oggm.shop.ecmwf import set_ecmwf_url, get_ecmwf_file
 
 
 # import the new models
-from mbmod_daily_oneflowline import *
 
 warnings.filterwarnings("once", category=DeprecationWarning)  # noqa: E402
 
@@ -45,7 +46,15 @@ warnings.filterwarnings("once", category=DeprecationWarning)  # noqa: E402
 
 
 # %%
+# add era5_daily dataset, this only works with process_era5_daily_data
+#BASENAMES = {}
+#BASENAMES['ERA5_daily'] =   { 
+#        'inv':'era5/daily/v1.0/era5_glacier_invariant_flat.nc',
+#        'tmp':'era5/daily/v1.0/era5_daily_t2m_1979-2018_flat.nc'
+#        # only glacier-relevant gridpoints included!
+#        }
 
+from mbmod_daily_oneflowline import process_era5_daily_data, BASENAMES
 
 # %%
 def test_process_era5_daily_data():
@@ -71,10 +80,10 @@ def test_process_era5_daily_data():
     
 
     process_era5_daily_data(gdir, y0 =1979, y1 = 2018, 
-                                       output_filesuffix = '_daily')
+                            )
 
-    filename = 'climate_historical'
-    fpath = gdir.get_filepath(filename, filesuffix='_daily')
+    filename = 'climate_historical_daily'
+    fpath = gdir.get_filepath(filename) # , filesuffix='_daily')
 
     # check the climate files of an individual glacier (Hintereisferner)
     xr_nc = xr.open_dataset(fpath)
@@ -101,9 +110,10 @@ def test_process_era5_daily_data():
     
     oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset = "ERA5",
                                        y0 =1979, y1 = 2018, 
-                                       output_filesuffix = '_monthly')
+                                       ) #output_filesuffix = '_monthly')
+    filename = 'climate_historical'
 
-    fpath = gdir.get_filepath(filename, filesuffix='_monthly')
+    fpath = gdir.get_filepath(filename) #, filesuffix='_monthly')
     xr_nc_monthly = xr.open_dataset(fpath)
     
     # check if summed up monthly precipitation from daily
@@ -121,13 +131,13 @@ def test_process_era5_daily_data():
     # 
     with pytest.raises(InvalidParamsError):
         # dataset only goes from 1979--2018
-        process_era5_daily_data(gdir, y0 =1979, y1 = 2019, 
-                                       output_filesuffix = '_daily')
+        process_era5_daily_data(gdir, y0 =1979, y1 = 2019)
+                                      # output_filesuffix = '_daily')
         
         # in cfg.PARAMS that is initiated during testing, 
         # cfg.PARAMS[hydro_month_nh = 10], this is in conflict with 8        
-        process_era5_daily_data(gdir, y0 =1979, y1 = 2018, hydro_month_nh=8,
-                                       output_filesuffix = '_daily')
+        process_era5_daily_data(gdir, y0 =1979, y1 = 2018, hydro_month_nh=8)
+                                 #      output_filesuffix = '_daily')
 
 def test_ERA5_daily_dataset():
     

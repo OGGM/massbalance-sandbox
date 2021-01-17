@@ -46,8 +46,8 @@ from oggm.core.flowline import (FluxBasedModel, FlowlineModel,
                                 flowline_from_dataset, FileModel,
                                 run_constant_climate, run_random_climate,
                                 run_from_climate_data)
-from oggm.utils._workflow import *
-
+#from oggm.utils._workflow import *
+import os
 from oggm.exceptions import InvalidWorkflowError, InvalidParamsError
 
 FluxBasedModel = partial(FluxBasedModel, inplace=True)
@@ -57,10 +57,20 @@ FlowlineModel = partial(FlowlineModel, inplace=True)
 # above just the same input as in test_models
 
 # import the new models
-from mbmod_daily_oneflowline import *
 from help_func import compute_stat, minimize_bias, optimize_std_quot_brentq
 
 import scipy
+
+# add era5_daily dataset, this only works with process_era5_daily_data
+# BASENAMES = {}
+#BASENAMES['ERA5_daily'] =   { 
+#        'inv':'era5/daily/v1.0/era5_glacier_invariant_flat.nc',
+#        'tmp':'era5/daily/v1.0/era5_daily_t2m_1979-2018_flat.nc'
+#        # only glacier-relevant gridpoints included!
+#        }
+
+from mbmod_daily_oneflowline import process_era5_daily_data, mb_modules, BASENAMES
+
 # %%
 # I can't use the test directory because of different flowlines
 # # some stuff from hef_gdir...
@@ -109,6 +119,9 @@ mu_star_opt_var = {'mb_monthly': 195.304843,
                             'mb_real_daily':159.901181}
 pf = 2.5
 # %%
+
+
+# %%
 def test_minimize_bias():
     # just checks if minimisation gives always same results 
     grad_type = 'cte'
@@ -116,12 +129,13 @@ def test_minimize_bias():
     loop = False
     cfg.PARAMS['baseline_climate'] = 'ERA5dr'
     oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset = 'ERA5dr')
-    for mb_type in [ 'mb_monthly','mb_daily', 'mb_real_daily']:
+    for mb_type in [  'mb_real_daily']: # 'mb_monthly','mb_daily',
 
         if mb_type !='mb_real_daily':
             cfg.PARAMS['baseline_climate'] = 'ERA5dr'
             oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset = 'ERA5dr') 
         else:
+            cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
             process_era5_daily_data(gdir)
 
             
@@ -132,6 +146,7 @@ def test_minimize_bias():
         hgts, widths = gdir.get_inversion_flowline_hw()
         mbdf = gdir.get_ref_mb_data()
         # check if they give the same optimal DDF
+        # print(mu_star_opt_cte[mb_type], DDF_opt)
         assert np.round(mu_star_opt_cte[mb_type]/DDF_opt, 3) == 1
         
         gd_mb = mb_modules(gdir, DDF_opt,   mb_type=mb_type,
@@ -144,7 +159,10 @@ def test_minimize_bias():
         
         # check if the bias is optimised
         assert bias.round() == 0
-        
+   
+    
+test_minimize_bias()    
+# %%
 def test_optimize_std_quot_brentq():
     # check if double optimisation of bias and std_quotient works
     
@@ -159,6 +177,7 @@ def test_optimize_std_quot_brentq():
             cfg.PARAMS['baseline_climate'] = 'ERA5dr'
             oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset = 'ERA5dr') 
         else:
+            cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
             process_era5_daily_data(gdir)
             
         hgts, widths = gdir.get_inversion_flowline_hw()
@@ -193,6 +212,7 @@ def test_mb_modules_monthly():
     
 
     mu_opt = mu_star_opt_cte['mb_monthly']
+    cfg.PARAMS['baseline_climate'] = 'ERA5dr'
     oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset = "ERA5")
     mb_mod = mb_modules(gdir, mu_opt,
                         mb_type = 'mb_monthly',
@@ -259,8 +279,10 @@ def test_present_time_glacier_massbalance(): # self
                         fail_err_4 = False
                         mu_star_opt = mu_star_opt_cte
                     if climate =='ERA5dr':
+                        cfg.PARAMS['baseline_climate'] = 'ERA5dr'
                         oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset = "ERA5dr")
                     elif climate == 'ERA5_daily':
+                        cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
                         process_era5_daily_data(gdir)
                     else:
                         tasks.process_climate_data(gdir)
@@ -360,9 +382,11 @@ def test_monthly_glacier_massbalance():
                     fail_err_4 = False
                     mu_star_opt = mu_star_opt_cte
                 if climate =='ERA5dr':
+                    cfg.PARAMS['baseline_climate'] = 'ERA5dr'
                     oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset = "ERA5dr")
                 elif climate == 'ERA5_daily':
                     process_era5_daily_data(gdir)
+                    cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
                 else:
                     tasks.process_climate_data(gdir)
                     pass
@@ -444,6 +468,7 @@ def test_loop():
 
     climate = 'ERA5dr' 
     mb_type = 'mb_daily'
+    cfg.PARAMS['baseline_climate'] = 'ERA5dr'
     oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset = "ERA5dr")
 
     for grad_type in ['cte', 'var_an_cycle']:
@@ -530,6 +555,7 @@ def test_N():
     
     climate = 'ERA5dr' 
     mb_type = 'mb_daily'
+    cfg.PARAMS['baseline_climate'] = 'ERA5dr'
     oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset = "ERA5dr")
 
     for grad_type in ['cte', 'var_an_cycle']:

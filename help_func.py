@@ -13,7 +13,7 @@ import scipy
 import matplotlib.pyplot as plt
 
 import numpy as np
-from mbmod_daily_oneflowline import *
+from mbmod_daily_oneflowline import process_era5_daily_data, mb_modules, BASENAMES
 #base_url = 'https://cluster.klima.uni-bremen.de/~fmaussion/gdirs/prepro_l2_202010/elevbands_fl'
 
 
