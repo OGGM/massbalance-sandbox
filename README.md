@@ -20,9 +20,9 @@ At the moment these options are available:
 
 ## to work with the new mb_types:
 - ***help_func.py***: need helper functions to minimize the bias, optimise std_quot and to compute performance statistics
-- ***mb_type_intercomparison_oneflowline_HEF.ipynb***: shows mb type intercomparison for Hintereisferner
+- ***HEF_mb_type_intercomparison_oneflowline.ipynb***: shows mb type intercomparison for Hintereisferner
     - plots in **figures_hef**
-- ***mb_type_intercomparison_oneflowline_refglaciers.ipynb*** : shows intercomparison for Alpine reference glaciers
+- ***refglaciersAlps_mb_type_intercomparison_oneflowline.ipynb*** : shows intercomparison for Alpine reference glaciers
   plots in:
     - **figures_alps** (performance measures for Alpine reference glaciers)
     - **figures_alps_indiv** (observed and modelled mb time series with performance measures for each Alpine reference glacier 
