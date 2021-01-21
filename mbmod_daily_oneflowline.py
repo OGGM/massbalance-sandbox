@@ -143,7 +143,10 @@ def write_climate_file(gdir, time, prcp, temp,
         nc.ref_pix_dis = haversine(gdir.cenlon, gdir.cenlat,
                                    ref_pix_lon, ref_pix_lat)
         nc.climate_source = source
-        nc.hydro_yr_0 = y0 + 1
+        if time[0].month == 1:
+            nc.hydro_yr_0 = y0
+        else:
+            nc.hydro_yr_0 = y0 + 1
         nc.hydro_yr_1 = y1
 
         nc.createDimension('time', None)
@@ -172,9 +175,9 @@ def write_climate_file(gdir, time, prcp, temp,
         v = nc.createVariable('prcp', 'f4', ('time',), zlib=zlib)
         v.units = 'kg m-2'
         #### this could be made more beautriful 
-        if len(prcp) >(y1-y0)*30*12: # just rough estimate
+        if len(prcp) >(nc.hydro_yr_1-nc.hydro_yr_0 +1) *30*12: # just rough estimate
             v.long_name = 'total daily precipitation amount, assumed same for each day of month'
-        elif len(prcp)==(y1-y0)*12:
+        elif len(prcp)==(nc.hydro_yr_1-nc.hydro_yr_0 +1)*12:
             v.long_name = 'total monthly precipitation amount'
         else:
             v.long_name = 'total monthly precipitation amount'
@@ -216,8 +219,7 @@ def write_climate_file(gdir, time, prcp, temp,
 
 @entity_task(log, writes=['climate_historical_daily'])
 def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
-                            cluster = False, hydro_month_nh = 10,
-                             hydro_month_sh = 4):
+                            cluster = False):
     """Processes and writes the era5 daily baseline climate data for a glacier.
     into climate_historical_daily.nc
     
@@ -242,12 +244,7 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
     cluster : bool
         default is False, if this is run on the cluster, set it to True, 
         because we do not need to download the files 
-    hydro_month_nh : int 
-        month where the hydrological year starts in the northern hemisphere
-        (default is 10), values from 1-12 valid
-    hydro_month_sh : int 
-        month where the hydrological year starts in the southern hemisphere
-        (default is 10), values from 1-12 valid
+
     """
 
 
@@ -266,42 +263,17 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
         path = cluster_path + BASENAMES[dataset]['tmp']
     else:
         path = get_ecmwf_file(dataset, 'tmp')
-
-    # check if hydro_month of function coincide with cfg.PARAMS if it exists
-    try:
-        # check if it exists
-        cfg.PARAMS['hydro_month_sh']
-        
-        # raise an error if the two values do not coincide
-        if cfg.PARAMS['hydro_month_sh']!=hydro_month_sh:
-            raise InvalidParamsError('hydro_month_sh in this function is \
-                                     different to cfg.PARAMS["hydro_month_sh"]')
-    
-    except KeyError:
-        # if it does not exist, just use the value as defined
-        pass
-    
-    try:
-        # check if it exists
-        cfg.PARAMS['hydro_month_nh']
-        if cfg.PARAMS['hydro_month_nh']!=hydro_month_nh:
-            raise InvalidParamsError('hydro_month_nh in this function is \
-                                     different to cfg.PARAMS["hydro_month_nh"]')
-    
-    except KeyError:
-        # if it does not exist, just use the value as defined
-        pass
-
         
     # Use xarray to read the data
+    # would go faster with netCDF -.-
     with xr.open_dataset(path) as ds:
         assert ds.longitude.min() >= 0
 
         # set temporal subset for the ts data (hydro years) 
         if gdir.hemisphere=='nh':
-            sm = hydro_month_nh            
+            sm = cfg.PARAMS['hydro_month_nh']            
         elif gdir.hemisphere=='sh':
-            sm = hydro_month_sh
+            sm = cfg.PARAMS['hydro_month_sh']
         
         em = sm - 1 if (sm > 1) else 12
 
@@ -317,7 +289,7 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
         # if default settings: this is the last day in March or September
         end_day = int(ds.sel(time='{}-{:02d}'.format(y1, em)).time.dt.daysinmonth[-1].values)
             
-        # if other hydro_month need to adapt this!!!
+        #  this was tested also for hydro_month = 1
         ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
                                '{}-{:02d}-{}'.format(y1, em, end_day)))
         

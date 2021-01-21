@@ -96,7 +96,7 @@ if not os.path.exists(test_dir):
                                 reset=True)
 # %%
 cfg.PATHS['working_dir'] = test_dir
-base_url = 'https://cluster.klima.uni-bremen.de/~fmaussion/gdirs/prepro_l2_202010/elevbands_fl'
+base_url = 'https://cluster.klima.uni-bremen.de/~fmaussion/gdirs/prepro_l2_202010/elevbands_fl_with_consensus'
 
 # %%
 # maybe put this into a function??? 
@@ -119,17 +119,45 @@ mu_star_opt_var = {'mb_monthly': 195.304843,
                             'mb_real_daily':159.901181}
 pf = 2.5
 # %%
-
+def test_hydro_years_HEF():  
+    # only very basic test, the other stuff is done in oggm man basis
+    # test if it also works for hydro_month ==1, necessary for geodetic mb
+    # if hydro_month ==1, and msm start in 1979, then hydro_year should also be 1979??
+    # this works only if changes in _workflow.py are made in write_monthly_climate...
+    cfg.PARAMS['hydro_month_nh'] = 1
+    
+    h, w = gdir.get_inversion_flowline_hw()
+    fls = gdir.read_pickle('inversion_flowlines')
+    
+    cfg.PARAMS['baseline_climate'] = 'ERA5dr'
+    oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset = 'ERA5dr')
+    f = gdir.get_filepath('climate_historical', filesuffix='')
+    test_climate = xr.open_dataset(f)
+    assert test_climate.time[0] == np.datetime64('1979-01-01')
+    assert test_climate.time[-1] == np.datetime64('2018-12-01')
+    
+    # now test it for ERA5_daily 
+    cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
+    process_era5_daily_data(gdir)
+    f = gdir.get_filepath('climate_historical', filesuffix='_daily')
+    test_climate = xr.open_dataset(f)
+    assert test_climate.time[0] == np.datetime64('1979-01-01')
+    assert test_climate.time[-1] == np.datetime64('2018-12-31')
+    # 
 
 # %%
 def test_minimize_bias():
+    
+    # important to initialize again, otherwise hydro_month_nh =1 
+    # from test_hydro_years_HEF...
+    cfg.initialize()
+
     # just checks if minimisation gives always same results 
     grad_type = 'cte'
     N = 2000
     loop = False
-    cfg.PARAMS['baseline_climate'] = 'ERA5dr'
-    oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset = 'ERA5dr')
-    for mb_type in [  'mb_real_daily']: # 'mb_monthly','mb_daily',
+
+    for mb_type in ['mb_real_daily', 'mb_monthly','mb_daily']:
 
         if mb_type !='mb_real_daily':
             cfg.PARAMS['baseline_climate'] = 'ERA5dr'
@@ -159,11 +187,13 @@ def test_minimize_bias():
         
         # check if the bias is optimised
         assert bias.round() == 0
-   
-    
-test_minimize_bias()    
+# %%
+
 # %%
 def test_optimize_std_quot_brentq():
+    
+    cfg.initialize()
+
     # check if double optimisation of bias and std_quotient works
     
     grad_type = 'cte'
@@ -210,6 +240,7 @@ def test_optimize_std_quot_brentq():
 # %%
 def test_mb_modules_monthly():
     
+    cfg.initialize()
 
     mu_opt = mu_star_opt_cte['mb_monthly']
     cfg.PARAMS['baseline_climate'] = 'ERA5dr'
@@ -258,6 +289,7 @@ def test_mb_modules_monthly():
 
 
 def test_present_time_glacier_massbalance(): # self
+        cfg.initialize()
                 
         # init_present_time_glacier(gdir) # if I use this, I have the wrong flowlines
 
@@ -367,6 +399,7 @@ def test_monthly_glacier_massbalance():
     # I think there is a problem with SEC_IN_MONTH/SEC_IN_YEAR ...
     
     # this could be optimised and included in the above tests
+    cfg.initialize()
 
     # do this for all model types
     for climate in [ 'ERA5dr','ERA5_daily']: # ONLY TEST it for ERA5dr or ERA5_daily!!!
@@ -465,6 +498,7 @@ def test_loop():
     # (no loop) is 30% slower, it raises an error
     
     # this could be optimised and included in the above tests
+    cfg.initialize()
 
     climate = 'ERA5dr' 
     mb_type = 'mb_daily'
@@ -552,7 +586,8 @@ def test_N():
     
     # this could be optimised and included in the above tests
 
-    
+    cfg.initialize()
+
     climate = 'ERA5dr' 
     mb_type = 'mb_daily'
     cfg.PARAMS['baseline_climate'] = 'ERA5dr'

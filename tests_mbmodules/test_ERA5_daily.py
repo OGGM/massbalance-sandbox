@@ -67,8 +67,9 @@ def test_process_era5_daily_data():
                                     reset=True)
     cfg.PATHS['working_dir'] = test_dir
 
-    base_url = 'https://cluster.klima.uni-bremen.de/~fmaussion/gdirs/prepro_l2_202010/elevbands_fl'
-    
+    # base_url = 'https://cluster.klima.uni-bremen.de/~fmaussion/gdirs/prepro_l2_202010/elevbands_fl'
+    base_url = 'https://cluster.klima.uni-bremen.de/~fmaussion/gdirs/prepro_l2_202010/elevbands_fl_with_consensus'
+
     
     df = utils.get_rgi_glacier_entities(['RGI60-11.00897'])
     gdirs = workflow.init_glacier_directories(df, from_prepro_level=2,
