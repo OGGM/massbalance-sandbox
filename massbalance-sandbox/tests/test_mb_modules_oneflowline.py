@@ -11,14 +11,13 @@ import warnings
 warnings.filterwarnings("once", category=DeprecationWarning)  # noqa: E402
 
 from functools import partial
-import shutil
-import copy
 import time
 import numpy as np
 import pandas as pd
 import shapely.geometry as shpg
 from numpy.testing import assert_allclose
 import pytest
+import scipy
 
 # Local imports
 import oggm
@@ -48,7 +47,7 @@ from oggm.core.flowline import (FluxBasedModel, FlowlineModel,
                                 run_from_climate_data)
 #from oggm.utils._workflow import *
 import os
-from oggm.exceptions import InvalidWorkflowError, InvalidParamsError
+from oggm.exceptions import InvalidParamsError
 
 FluxBasedModel = partial(FluxBasedModel, inplace=True)
 FlowlineModel = partial(FlowlineModel, inplace=True)
@@ -58,9 +57,6 @@ FlowlineModel = partial(FlowlineModel, inplace=True)
 
 # import the new models
 from help_func import compute_stat, minimize_bias, optimize_std_quot_brentq
-
-import scipy
-
 # add era5_daily dataset, this only works with process_era5_daily_data
 # BASENAMES = {}
 #BASENAMES['ERA5_daily'] =   { 
@@ -102,7 +98,7 @@ base_url = 'https://cluster.klima.uni-bremen.de/~fmaussion/gdirs/prepro_l2_20201
 # maybe put this into a function??? 
 df = utils.get_rgi_glacier_entities(['RGI60-11.00897'])
 gdirs = workflow.init_glacier_directories(df, from_prepro_level=2,
-                                          prepro_border=40, 
+                                          prepro_border=40,
                                   prepro_base_url=base_url,
                                   prepro_rgi_version='62')
 gdir = gdirs[0]

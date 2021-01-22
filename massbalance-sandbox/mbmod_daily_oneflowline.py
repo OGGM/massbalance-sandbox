@@ -408,7 +408,7 @@ class mb_modules(MassBalanceModel):
 
     def __init__(self, gdir, mu_star, bias = 0, 
                  mb_type ='mb_daily', N=10000, loop = False,
-                 grad_type = 'cte', filename=None,
+                 grad_type = 'cte', filename='climate_historical',
                  input_filesuffix='',
                  repeat=False, ys=None, ye=None, 
                  t_solid = 0, t_liq =2, t_melt = 0, prcp_fac = 2.5,
@@ -453,10 +453,10 @@ class mb_modules(MassBalanceModel):
             'var' (varies spatially & temporally as in the climate files)
         filename : str, optional
             set to a different BASENAME if you want to use alternative climate
-            data, if None, it is set to default climate_historical
-            or climate_historical_daily for ERA5_daily
+            data, default is climate_historical
         input_filesuffix : str, 
-            the file suffix of the input climate file
+            the file suffix of the input climate file, default is '',
+            if ERA5_daily with daily temperatures, it is set to _daily
         repeat : bool
             Whether the climate period given by [ys, ye] should be repeated
             indefinitely in a circular way
@@ -550,18 +550,8 @@ class mb_modules(MassBalanceModel):
             raise InvalidParamsError(text) 
          
 
-        filename = 'climate_historical'
-        #if filename==None:
         if baseline_climate =='ERA5_daily':
             input_filesuffix = '_daily'
-            # could instead change the filename, but then I have to other stuff too
-            #    filename = 'climate_historical_daily'
-                #_doc = 'The historical daily climate timeseries stored in a netCDF file. \
-                #    (only temperature is really daily, precipitation is just assumed constant\
-                #     for every day)'
-                #cfg.BASENAMES['climate_historical_daily'] = ('climate_historical_daily.nc', _doc)
-            #else:
-            #    filename = 'climate_historical'
 
         # Read climate file
         fpath = gdir.get_filepath(filename, filesuffix=input_filesuffix)
@@ -577,7 +567,7 @@ class mb_modules(MassBalanceModel):
                     self.temp_std = xr_nc['temp_std'].values #.variables[:]
                 except KeyError:
                     text = 'The applied climate has no temp std, do e.g. \
-                    oggm.shop.ecmwf.process_ecmwf_data(gd, dataset = "ERA5dr")'
+                        oggm.shop.ecmwf.process_ecmwf_data(gd, dataset = "ERA5dr")'
                     raise InvalidParamsError(text)
                     
             # goal is to get self.years/self.months in hydro_years
@@ -627,7 +617,6 @@ class mb_modules(MassBalanceModel):
             # Read timeseries
             self.temp = xr_nc['temp'].values 
             self.prcp = xr_nc['prcp'].values * prcp_fac 
-
 
             # lapse rate (temperature gradient)
             if (self.grad_type == 'var' or self.grad_type == 'var_an_cycle'):
