@@ -27,16 +27,15 @@ e.g. do:
     $ cd massbalance-sandbox
     $ pip install -e .
 
-A simple use case will be explained in docs/... .ipynb. 
-Test the installation via while being in the massbalance-sandbox folder:
+Test the installation via pytest while being in the massbalance-sandbox folder:
 
     $ pytest .
 
-
-The massbalance modules can be imported by
+The massbalance modules can be imported in python by
 
     >>> import MBsandbox
 
+A simple use case will be explained in docs/... .ipynb. 
 
 
 ## different mb_modules types that are working with the Huss flowlines
