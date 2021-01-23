@@ -15,8 +15,11 @@ At the moment these options are available:
 
 # How to install/use !
 <!-- structure as in https://github.com/fmaussion/scispack and oggm/oggm -->
-the newest OGGM developer version has to be installed in order MBsandbox works
+the newest OGGM developer version has to be installed in order that MBsandbox works:
+e.g. do:
 
+    $ conda create --name env_mb
+    $ source activate env_mb
     $ git clone  https://github.com/OGGM/oggm.git
     $ cd oggm 
     $ pip install -e .
@@ -25,6 +28,11 @@ the newest OGGM developer version has to be installed in order MBsandbox works
     $ pip install -e .
 
 A simple use case will be explained in docs/... .ipynb. 
+Test the installation via while being in the massbalance-sandbox folder:
+
+    $ pytest .
+
+
 The massbalance modules can be imported by
 
     >>> import MBsandbox
