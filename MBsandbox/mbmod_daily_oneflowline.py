@@ -2,42 +2,30 @@
 import numpy as np
 import pandas as pd
 import xarray as xr
-import oggm
-from oggm.core.massbalance import MassBalanceModel
 import os
 import netCDF4
 import datetime
 import warnings
-from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH
-
-#from scipy.interpolate import interp1d
-#from scipy import optimize as optimization
-# Locals
-from oggm.utils import (SuperclassMeta, lazy_property, floatyear_to_date,
-                        date_to_floatyear, monthly_timeseries, ncDataset,
-                        tolist, clip_min, clip_max, clip_array)
-from oggm.exceptions import InvalidParamsError
-
 import scipy.stats as stats
-
-
-import warnings
-from oggm.shop.ecmwf import set_ecmwf_url, get_ecmwf_file, BASENAMES
-from oggm.utils._funcs import haversine
-
-
 import logging
 
-# Optional libs
-try:
-    import salem
-except ImportError:
-    pass
 
 # Locals
-from oggm import cfg
-from oggm import utils
+# import oggm
+
 from oggm import entity_task
+
+from oggm import cfg
+from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH
+from oggm.utils import (floatyear_to_date,
+                        ncDataset,
+                        clip_min, clip_array)
+from oggm.utils._funcs import haversine
+
+from oggm.exceptions import InvalidParamsError
+from oggm.shop.ecmwf import get_ecmwf_file, BASENAMES
+
+from oggm.core.massbalance import MassBalanceModel
 
 # Module logger
 log = logging.getLogger(__name__)
@@ -47,24 +35,21 @@ ECMWF_SERVER = 'https://cluster.klima.uni-bremen.de/~oggm/climate/'
 
 # %%
 
-
 # add era5_daily dataset, this only works with process_era5_daily_data
-BASENAMES['ERA5_daily'] =   { 
-        'inv':'era5/daily/v1.0/era5_glacier_invariant_flat.nc',
-        'tmp':'era5/daily/v1.0/era5_daily_t2m_1979-2018_flat.nc'
+BASENAMES['ERA5_daily'] = {
+        'inv': 'era5/daily/v1.0/era5_glacier_invariant_flat.nc',
+        'tmp': 'era5/daily/v1.0/era5_daily_t2m_1979-2018_flat.nc'
         # only glacier-relevant gridpoints included!
         }
 
+
 # this could be used in general
 def write_climate_file(gdir, time, prcp, temp,
-                               ref_pix_hgt, ref_pix_lon, ref_pix_lat, #*,
-                               gradient=None,
-                               temp_std=None,
-                               time_unit=None,
-                               calendar=None,
-                               source=None,
-                               file_name='climate_historical',
-                               filesuffix=''):
+                       ref_pix_hgt, ref_pix_lon, ref_pix_lat,
+                       gradient=None, temp_std=None,
+                       time_unit=None, calendar=None,
+                       source=None, file_name='climate_historical',
+                       filesuffix=''):
     """Creates a netCDF4 file with climate data timeseries.
 
     Parameters
@@ -103,7 +88,7 @@ def write_climate_file(gdir, time, prcp, temp,
         Apply a suffix to the file
     """
 
-    if source =='ERA5_daily' and filesuffix =='':
+    if source == 'ERA5_daily' and filesuffix == '':
         raise InvalidParamsError('filesuffix should be "_daily" as only \
                                  file_name climate_historical is normally \
                                      monthly data')
@@ -124,7 +109,7 @@ def write_climate_file(gdir, time, prcp, temp,
         time = pd.DatetimeIndex(time)
         y0 = time[0].year
         y1 = time[-1].year
-    
+
     if time_unit is None:
         # http://pandas.pydata.org/pandas-docs/stable/timeseries.html
         # #timestamp-limitations
@@ -155,7 +140,7 @@ def write_climate_file(gdir, time, prcp, temp,
         nc.author_info = 'Open Global Glacier Model'
 
         timev = nc.createVariable('time', 'i4', ('time',))
-        
+
         tatts = {'units': time_unit}
         if calendar is None:
             calendar = 'standard'
@@ -174,29 +159,29 @@ def write_climate_file(gdir, time, prcp, temp,
 
         v = nc.createVariable('prcp', 'f4', ('time',), zlib=zlib)
         v.units = 'kg m-2'
-        #### this could be made more beautriful 
-        if len(prcp) >(nc.hydro_yr_1-nc.hydro_yr_0 +1) *30*12: # just rough estimate
-            v.long_name = 'total daily precipitation amount, assumed same for each day of month'
-        elif len(prcp)==(nc.hydro_yr_1-nc.hydro_yr_0 +1)*12:
+        # this could be made more beautriful
+        # just rough estimate
+        if len(prcp) > (nc.hydro_yr_1 - nc.hydro_yr_0 + 1) * 30 * 12:
+            v.long_name = ("total daily precipitation amount, "
+                           "assumed same for each day of month")
+        elif len(prcp) == (nc.hydro_yr_1 - nc.hydro_yr_0 + 1) * 12:
             v.long_name = 'total monthly precipitation amount'
         else:
             v.long_name = 'total monthly precipitation amount'
-            import warnings
             warnings.warn("there might be a conflict in the prcp timeseries,"
-                         "please check!")
+                          "please check!")
 
         v[:] = prcp
 
         v = nc.createVariable('temp', 'f4', ('time',), zlib=zlib)
         v.units = 'degC'
-        if source=='ERA5_daily' and len(temp)>(y1-y0)*30*12:   
+        if source == 'ERA5_daily' and len(temp) > (y1 - y0) * 30 * 12:
             v.long_name = '2m daily temperature at height ref_hgt'
-        elif source=='ERA5_daily' and len(temp)<=(y1-y0)*30*12:  
-            raise InvalidParamsError('if the climate dataset (here source)\
-                                     is ERA5_daily, temperatures should be in\
-                                         daily resolution, please check or\
-                                             set source to another climate\
-                                                 dataset')
+        elif source == 'ERA5_daily' and len(temp) <= (y1 - y0) * 30 * 12:
+            raise InvalidParamsError('if the climate dataset (here source)'
+                                     'is ERA5_daily, temperatures should be in'
+                                     'daily resolution, please check or set'
+                                     'set source to another climate dataset')
         else:
             v.long_name = '2m monthly temperature at height ref_hgt'
 
@@ -216,18 +201,17 @@ def write_climate_file(gdir, time, prcp, temp,
             v[:] = temp_std
 
 
-
 @entity_task(log, writes=['climate_historical_daily'])
 def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
-                            cluster = False):
+                            cluster=False):
     """Processes and writes the era5 daily baseline climate data for a glacier.
     into climate_historical_daily.nc
-    
+
     Extracts the nearest timeseries and writes everything to a NetCDF file.
     This uses only the ERA5 daily temperatures. The precipitation, lapse
-    rate and standard deviations are used from ERA5dr. 
-    
-    TODO: see _verified_download_helper no known hash for 
+    rate and standard deviations are used from ERA5dr.
+
+    TODO: see _verified_download_helper no known hash for
     era5_daily_t2m_1979-2018_flat.nc and era5_glacier_invariant_flat
     ----------
     y0 : int
@@ -242,11 +226,10 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
         this add a suffix to the output file (useful to avoid overwriting
         previous experiments)
     cluster : bool
-        default is False, if this is run on the cluster, set it to True, 
-        because we do not need to download the files 
+        default is False, if this is run on the cluster, set it to True,
+        because we do not need to download the files
 
     """
-
 
     # era5daily only for temperature
     dataset = 'ERA5_daily'
@@ -257,71 +240,70 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
     lon = gdir.cenlon + 360 if gdir.cenlon < 0 else gdir.cenlon
     lat = gdir.cenlat
 
-    cluster_path = '/home/www/oggm/climate/'    
+    cluster_path = '/home/www/oggm/climate/'
 
     if cluster:
         path = cluster_path + BASENAMES[dataset]['tmp']
     else:
         path = get_ecmwf_file(dataset, 'tmp')
-        
+
     # Use xarray to read the data
     # would go faster with netCDF -.-
     with xr.open_dataset(path) as ds:
         assert ds.longitude.min() >= 0
 
-        # set temporal subset for the ts data (hydro years) 
-        if gdir.hemisphere=='nh':
-            sm = cfg.PARAMS['hydro_month_nh']            
-        elif gdir.hemisphere=='sh':
+        # set temporal subset for the ts data (hydro years)
+        if gdir.hemisphere == 'nh':
+            sm = cfg.PARAMS['hydro_month_nh']
+        elif gdir.hemisphere == 'sh':
             sm = cfg.PARAMS['hydro_month_sh']
-        
+
         em = sm - 1 if (sm > 1) else 12
 
         yrs = ds['time.year'].data
         y0 = yrs[0] if y0 is None else y0
         y1 = yrs[-1] if y1 is None else y1
-        
-        
-        if y1>2018 or y0<1979:
+
+        if y1 > 2018 or y0 < 1979:
             text = 'The climate files only go from 1979--2018,\
                 choose another y0 and y1'
             raise InvalidParamsError(text)
         # if default settings: this is the last day in March or September
-        end_day = int(ds.sel(time='{}-{:02d}'.format(y1, em)).time.dt.daysinmonth[-1].values)
-            
+        time_f = '{}-{:02d}'.format(y1, em)
+        end_day = int(ds.sel(time=time_f).time.dt.daysinmonth[-1].values)
+
         #  this was tested also for hydro_month = 1
         ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
                                '{}-{:02d}-{}'.format(y1, em, end_day)))
-        
+
         try:
             # computing all the distances and choose the nearest gridpoint
-            c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2 
+            c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2
             ds = ds.isel(points=c.argmin())
-        except ValueError: #I turned this around
-            ds = ds.sel(longitude=lon, latitude=lat, method='nearest') #     
+        # I turned this around
+        except ValueError:
+            ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
             # normally if I do the flattening, this here should not occur
-            
+
         # temperature should be in degree Celsius for the glacier climate files
         temp = ds['t2m'].data - 273.15
         time = ds.time.data
 
         ref_lon = float(ds['longitude'])
         ref_lat = float(ds['latitude'])
-                
 
         ref_lon = ref_lon - 360 if ref_lon > 180 else ref_lon
-        
+
     # pre should be done as in ERA5dr datasets
     with xr.open_dataset(get_ecmwf_file(dataset_othervars, 'pre')) as ds:
         assert ds.longitude.min() >= 0
-        
 
         yrs = ds['time.year'].data
         y0 = yrs[0] if y0 is None else y0
         y1 = yrs[-1] if y1 is None else y1
-        # Attention here we take the same y0 and y1 as given from the 
+        # Attention here we take the same y0 and y1 as given from the
         # daily tmp dataset (goes till end of 2018)
-                
+
         ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
                                '{}-{:02d}-01'.format(y1, em)))
         try:
@@ -331,17 +313,15 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
             # if Flattened ERA5_precipitation?
             c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2
             ds = ds.isel(points=c.argmin())
-            
+
         # the prcp dataset needs to be restructured to have values for each day
         prcp = ds['tp'].data * 1000
         # just assume that precipitation is every day the same:
         prcp = np.repeat(prcp, ds['time.daysinmonth'])
-        # Attention the unit is now prcp per day 
+        # Attention the unit is now prcp per day
         # (not per month as in OGGM default:
         # prcp = ds['tp'].data * 1000 * ds['time.daysinmonth']
 
-            
-        
     if cluster:
         path_inv = cluster_path + BASENAMES[dataset]['inv']
     else:
@@ -356,53 +336,49 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
         except ValueError:
             # this should not occur
             ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
-            
-        G = cfg.G # 9.80665
+
+        G = cfg.G  # 9.80665
         hgt = ds['z'].data / G
 
     gradient = None
     temp_std = None
-
-
-    with xr.open_dataset(get_ecmwf_file(dataset_othervars, 'lapserates')) as ds: 
+    path_lapserates = get_ecmwf_file(dataset_othervars, 'lapserates')
+    with xr.open_dataset(path_lapserates) as ds:
         assert ds.longitude.min() >= 0
-        
+
         yrs = ds['time.year'].data
         y0 = yrs[0] if y0 is None else y0
         y1 = yrs[-1] if y1 is None else y1
-        # Attention here we take the same y0 and y1 as given from the 
+        # Attention here we take the same y0 and y1 as given from the
         # daily tmp dataset (goes till end of 2018)
-        
+
         ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
                                '{}-{:02d}-01'.format(y1, em)))
-        
-        # no flattening done for the ERA5dr gradient dataset 
+
+        # no flattening done for the ERA5dr gradient dataset
         ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
-        
+
         # get the monthly gradient values
         gradient = ds['lapserate'].data
 
         # gradient needs to be restructured to have values for each day
         gradient = np.repeat(gradient, ds['time.daysinmonth'])
-        # assume same gradient for each day 
-
-
+        # assume same gradient for each day
 
     # OK, ready to write
     write_climate_file(gdir, time, prcp, temp, hgt, ref_lon, ref_lat,
-                                    filesuffix=output_filesuffix,
-                                    gradient=gradient,
-                                    temp_std=temp_std,
-                                    source=dataset,
-                                    file_name='climate_historical')
+                       filesuffix=output_filesuffix,
+                       gradient=gradient,
+                       temp_std=temp_std,
+                       source=dataset,
+                       file_name='climate_historical')
     # This is now a new function, which could also work for other climates
     # but is used, so far, only for ERA5_daily as source dataset ..
-        
 
 
 class mb_modules(MassBalanceModel):
     """Different mass balance modules compatible to OGGM with one flowline
-    
+
     so far this is only tested for the Huss flowlines
     """
 

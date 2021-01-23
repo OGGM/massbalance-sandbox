@@ -49,14 +49,11 @@ from oggm.core.flowline import (FluxBasedModel, FlowlineModel,
 import os
 from oggm.exceptions import InvalidParamsError
 
-FluxBasedModel = partial(FluxBasedModel, inplace=True)
-FlowlineModel = partial(FlowlineModel, inplace=True)
-
-
 # above just the same input as in test_models
 
 # import the new models
-from help_func import compute_stat, minimize_bias, optimize_std_quot_brentq
+from MBsandbox.help_func import (compute_stat, minimize_bias,
+                                 optimize_std_quot_brentq)
 # add era5_daily dataset, this only works with process_era5_daily_data
 # BASENAMES = {}
 #BASENAMES['ERA5_daily'] =   { 
@@ -65,8 +62,12 @@ from help_func import compute_stat, minimize_bias, optimize_std_quot_brentq
 #        # only glacier-relevant gridpoints included!
 #        }
 
-from mbmod_daily_oneflowline import process_era5_daily_data, mb_modules, BASENAMES
+from MBsandbox.mbmod_daily_oneflowline import (process_era5_daily_data,
+                                               mb_modules)
 
+
+FluxBasedModel = partial(FluxBasedModel, inplace=True)
+FlowlineModel = partial(FlowlineModel, inplace=True)
 # %%
 # I can't use the test directory because of different flowlines
 # # some stuff from hef_gdir...

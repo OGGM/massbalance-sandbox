@@ -18,17 +18,11 @@ here = path.abspath(path.dirname(__file__))
 with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
-req_packages = ['oggm']
-# the newest oggm developer version has to be installed in order that this works 
-# this needs to be updated  but I have to see how ... 
-# I would prefer to just give a requirements.txt file
-# I am not sure if I should write here everything down?
-# I will look for a method how I can automatically find out which packages are necessary
-# 
 
 
+# %%
 setup(
-    name='massbalance-sandbox',
+    name='MBsandbox',
     version='0.0.1',  # Required
     description='different mass balance models for OGGM',  # Required
     long_description=long_description,  # Optional
@@ -79,7 +73,7 @@ setup(
     # This field adds keywords for your project which will appear on the
     # project page. What does your project relate to?
     # Note that this is a string of words separated by whitespace, not a list.
-    keywords= 'glaciers climate geosciences' 
+    keywords='glaciers climate geosciences',
     # You can just specify package directories manually here if your project is
     # simple. Or you can use find_packages().
     #
@@ -89,7 +83,8 @@ setup(
     #
     #   py_modules=["my_module"],
     #
-    packages=find_packages(exclude=['docs', 'tests']),  # Required
+    packages=find_packages(exclude=['docs', 'MBsandbox.tests']),
+    # , 'massbalance-sandbox.tests']),  # Required
 
     # This field lists other packages that your project depends on to run.
     # Any package you put here will be installed by pip when your project is
@@ -97,7 +92,14 @@ setup(
     #
     # For an analysis of "install_requires" vs pip's requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
-    install_requires= req_packages,  # Optional
+    
+    # the newest oggm developer version has to be installed in order that this works 
+    # this needs to be updated  but I have to see how ... 
+    # I would prefer to just give a requirements.txt file
+    # I am not sure if I should write here everything down?
+    # I will look for a method how I can automatically find out which packages are necessary
+    # 
+    install_requires= [], #['oggm'],  # Optional
 
     # List additional groups of dependencies here (e.g. development
     # dependencies). Users will be able to install these using the "extras"
@@ -108,8 +110,8 @@ setup(
     # Similar to `install_requires` above, these must be valid existing
     # projects.
     extras_require={  # Optional
-        'test': ['pytest'],
-        'docs': ['ast']
+        #'test': ['pytest'],
+        #'docs': ['ast']
     },
 
     python_requires='>=3.7',
@@ -137,7 +139,11 @@ setup(
     #        'scispack=scispack.cli:main',
     #    ],
     #},
-
+    #entry_points={  # Optional
+       # 'console_scripts': [
+       #     'massbalance-sandbox=massbalance-sandbox:main',
+       # ],
+    #},
     # List additional URLs that are relevant to your project as a dict.
     #
     # This field corresponds to the "Project-URL" metadata fields:
@@ -152,3 +158,6 @@ setup(
         'Source': 'https://github.com/fmaussion/scispack',
     },
 )
+
+# %%
+    

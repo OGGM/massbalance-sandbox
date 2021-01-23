@@ -54,7 +54,7 @@ warnings.filterwarnings("once", category=DeprecationWarning)  # noqa: E402
 #        # only glacier-relevant gridpoints included!
 #        }
 
-from mbmod_daily_oneflowline import process_era5_daily_data, BASENAMES
+from MBsandbox.mbmod_daily_oneflowline import process_era5_daily_data
 
 # %%
 def test_process_era5_daily_data():
