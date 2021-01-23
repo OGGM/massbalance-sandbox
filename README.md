@@ -13,22 +13,27 @@ At the moment these options are available:
     - using lapse rates from ERA5 that vary throughout the year and inbetween glacier locations, 
     but that are constant inbetween the years (grad_type: 'var_an_cycle')
 
-# How to use/install !
+# How to install/use !
 <!-- structure as in https://github.com/fmaussion/scispack and oggm/oggm -->
-the newest OGGM developer version has to be installed in order that this works (via )
-< git clone  https://github.com/OGGM/oggm.git >
-cd oggm 
-pip install -e .
-< git clone https://github.com/OGGM/massbalance-sandbox >
-cd massbalance-sandbox
-pip install -e .
+the newest OGGM developer version has to be installed in order MBsandbox works
+
+    $ git clone  https://github.com/OGGM/oggm.git
+    $ cd oggm 
+    $ pip install -e .
+    $ git clone https://github.com/OGGM/massbalance-sandbox
+    $ cd massbalance-sandbox
+    $ pip install -e .
+
+A simple use case will be explained in docs/... .ipynb. 
+The massbalance modules can be imported by
+
+    >>> import MBsandbox
+
 
 
 ## different mb_modules types that are working with the Huss flowlines
 - ***mbmod_daily_oneflowline.py***: has the class ***mb_modules*** and ***process_era5_daily_data*** (+ function ***write_climate_file***)
-- this works only when some changes to OGGM are done:
-    - in cfg.py: include climate_historical_daily ...
-    - in _workflow.py: change some stuff of get_climate_info ... 
+
 
 ## to work with the new mb_types:
 - ***help_func.py***: need helper functions to minimize the bias, optimise std_quot and to compute performance statistics
