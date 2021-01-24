@@ -68,4 +68,7 @@ ToDO more nicely ...
 
 
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/master
