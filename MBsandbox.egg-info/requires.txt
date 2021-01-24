@@ -1,0 +1,13 @@
+numpy
+pytest
+matplotlib
+scipy
+pandas
+xarray
+netCDF4
+shapely
+tables
+geopandas
+salem
+joblib
+descartes

@@ -1,4 +1,12 @@
-""" different mb_module types added that are working with the Huss flowlines"""
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Dec 24 12:28:37 2020
+
+@author: lilianschuster
+
+different mb_module types added that are working with the Huss flowlines
+"""
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -8,23 +16,17 @@ import datetime
 import warnings
 import scipy.stats as stats
 import logging
-
-
-# Locals
 # import oggm
 
+# imports from oggm
 from oggm import entity_task
-
 from oggm import cfg
 from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH
-from oggm.utils import (floatyear_to_date,
-                        ncDataset,
+from oggm.utils import (floatyear_to_date, ncDataset,
                         clip_min, clip_array)
 from oggm.utils._funcs import haversine
-
 from oggm.exceptions import InvalidParamsError
 from oggm.shop.ecmwf import get_ecmwf_file, BASENAMES
-
 from oggm.core.massbalance import MassBalanceModel
 
 # Module logger
@@ -382,16 +384,16 @@ class mb_modules(MassBalanceModel):
     so far this is only tested for the Huss flowlines
     """
 
-    def __init__(self, gdir, mu_star, bias = 0, 
-                 mb_type ='mb_daily', N=10000, loop = False,
-                 grad_type = 'cte', filename='climate_historical',
+    def __init__(self, gdir, mu_star, bias=0,
+                 mb_type='mb_daily', N=10000, loop=False,
+                 grad_type='cte', filename='climate_historical',
                  input_filesuffix='',
-                 repeat=False, ys=None, ye=None, 
-                 t_solid = 0, t_liq =2, t_melt = 0, prcp_fac = 2.5,
-                 default_grad = -0.0065, 
-                 temp_local_gradient_bounds = [-0.009, -0.003],
-                 SEC_IN_YEAR = SEC_IN_YEAR,
-                 SEC_IN_MONTH = SEC_IN_MONTH
+                 repeat=False, ys=None, ye=None,
+                 t_solid=0, t_liq=2, t_melt=0, prcp_fac=2.5,
+                 default_grad=-0.0065,
+                 temp_local_gradient_bounds=[-0.009, -0.003],
+                 SEC_IN_YEAR=SEC_IN_YEAR,
+                 SEC_IN_MONTH=SEC_IN_MONTH
                  ):
         """ Initialize.
         Parameters
@@ -400,7 +402,7 @@ class mb_modules(MassBalanceModel):
             the glacier directory
         mu_star : float
             monthly temperature sensitivity (kg /m² /mth /K),
-            need to be prescribed, e.g. such that 
+            need to be prescribed, e.g. such that
             |mean(MODEL_MB)-mean(REF_MB)|--> 0
         bias : float, optional
             default is to use zero bias [mm we yr-1]
@@ -411,26 +413,26 @@ class mb_modules(MassBalanceModel):
             three types: 'mb_daily' (default: use temp_std and N percentiles),
             'mb_monthly' (same as default OGGM mass balance),
             'mb_real_daily' (use daily temperature values).
-            the mb_type only work if the baseline_climate of gdir is right 
+            the mb_type only work if the baseline_climate of gdir is right
         N : int
-            number of percentiles used to generate gaussian-like daily 
+            number of percentiles used to generate gaussian-like daily
             temperatures from daily std and mean monthly temp
         loop : bool
-            the way how the matrix multiplication is done, 
+            the way how the matrix multiplication is done,
             using np.matmul or a loop(default: False)
-            only applied if mb_type is 'mb_daily' 
+            only applied if mb_type is 'mb_daily'
             which one is faster?
         grad_type : str
             three types of applying the temperature gradient:
-            'cte' (default, constant lapse rate, set to default_grad, 
+            'cte' (default, constant lapse rate, set to default_grad,
                    same as in default OGGM)
-            'var_an_cycle' (varies spatially and over annual cycle, 
+            'var_an_cycle' (varies spatially and over annual cycle,
                             but constant over the years)
             'var' (varies spatially & temporally as in the climate files)
         filename : str, optional
             set to a different BASENAME if you want to use alternative climate
             data, default is climate_historical
-        input_filesuffix : str, 
+        input_filesuffix : str,
             the file suffix of the input climate file, default is '',
             if ERA5_daily with daily temperatures, it is set to _daily
         repeat : bool
@@ -443,7 +445,7 @@ class mb_modules(MassBalanceModel):
             The end of the climate period where the MB model is valid
             (default: the period with available data)
         t_solid : float
-            temperature threshold for solid precipitation 
+            temperature threshold for solid precipitation
             (degree Celsius, default 0)
         t_liq: float
             temperature threshold for liquid precipitation
@@ -453,12 +455,12 @@ class mb_modules(MassBalanceModel):
             (degree Celsius, default 0)
         prcp_fac : float, >0
             multiplicative precipitation correction factor (default 2.5)
-        default_grad : float, 
+        default_grad : float,
             constant lapse rate (temperature gradient, default: -0.0065 m/K)
-            if grad_type != cte, then this value is not used 
+            if grad_type != cte, then this value is not used
             but instead the changing lapse rate from the climate datasets
         temp_local_gradient_bounds : [float, float],
-            if grad_type != cte and the lapse rate does not lie in this range, 
+            if grad_type != cte and the lapse rate does not lie in this range,
             set it instead to these minimum, maximum gradients
             (default: [-0.009, -0.003] m/K)
         SEC_IN_YEAR: float
@@ -466,10 +468,10 @@ class mb_modules(MassBalanceModel):
             maybe this could be changed
         SEC_IN_MONTH: float
             seconds in a month (default: 2628000s),
-            maybe this could be changed as not each 
-            month has the same amount of seconds, 
+            maybe this could be changed as not each
+            month has the same amount of seconds,
             in February can be a difference of 8%
-            
+
         Attributes
         ----------
         temp_bias : float, default 0
@@ -483,71 +485,70 @@ class mb_modules(MassBalanceModel):
         self.bias = bias
 
         # Parameters (from cfg.PARAMS in OGGM default)
-        self.t_solid = t_solid 
-        self.t_liq = t_liq 
-        self.t_melt = t_melt 
+        self.t_solid = t_solid
+        self.t_liq = t_liq
+        self.t_melt = t_melt
         self.N = N
         self.mb_type = mb_type
         self.loop = loop
         self.grad_type = grad_type
-        # defaul rho is 900  kg/m3     
+        # default rho is 900  kg/m3
         self.rho = cfg.PARAMS['ice_density']
-        
 
         # Public attrs
         self.hemisphere = gdir.hemisphere
         self.temp_bias = 0.
         self.prcp_bias = 1.
         self.repeat = repeat
-        
+
         self.SEC_IN_YEAR = SEC_IN_YEAR
-        self.SEC_IN_MONTH = SEC_IN_MONTH        
-
-
+        self.SEC_IN_MONTH = SEC_IN_MONTH
 
         # check if the right climate is used for the right mb_type
-        # these checks might be changed if there are more climate datasets 
+        # these checks might be changed if there are more climate datasets
         # available!!!
-        # only have daily temperatures for 'ERA5_daily'        
+        # only have daily temperatures for 'ERA5_daily'
         baseline_climate = gdir.get_climate_info()['baseline_climate_source']
-        if self.mb_type=='mb_real_daily' and baseline_climate != 'ERA5_daily':
-            text = 'wrong climate for mb_real_daily, need to do e.g. \
-                process_era5_daily_data(gd) to enable ERA5_daily'
+        if (self.mb_type == 'mb_real_daily' and
+                baseline_climate != 'ERA5_daily'):
+            text = ('wrong climate for mb_real_daily, need to do e.g. '
+                    'process_era5_daily_data(gd) to enable ERA5_daily')
             raise InvalidParamsError(text)
         # mb_monthly does not work when daily temperatures are used
-        if self.mb_type=='mb_monthly' and baseline_climate =='ERA5_daily':
-            text = 'wrong climate for mb_monthly, need to do e.g. \
-            oggm.shop.ecmwf.process_ecmwf_data(gd, dataset = "ERA5dr")'
-            raise InvalidParamsError(text) 
+        if self.mb_type == 'mb_monthly' and baseline_climate == 'ERA5_daily':
+            text = ('wrong climate for mb_monthly, need to do e.g.'
+                    'oggm.shop.ecmwf.process_ecmwf_data(gd, dataset="ERA5dr")')
+            raise InvalidParamsError(text)
         # mb_daily needs temp_std
-        if self.mb_type=='mb_daily' and baseline_climate =='ERA5_daily':
+        if self.mb_type == 'mb_daily' and baseline_climate == 'ERA5_daily':
             text = 'wrong climate for mb_daily, need to do e.g. \
             oggm.shop.ecmwf.process_ecmwf_data(gd, dataset = "ERA5dr")'
-            raise InvalidParamsError(text) 
-         
+            raise InvalidParamsError(text)
 
-        if baseline_climate =='ERA5_daily':
+        if baseline_climate == 'ERA5_daily':
             input_filesuffix = '_daily'
 
         # Read climate file
         fpath = gdir.get_filepath(filename, filesuffix=input_filesuffix)
-        
+
         # used xarray instead of netCDF4, is this slower?
         with xr.open_dataset(fpath) as xr_nc:
-            if self.mb_type =='mb_real_daily' or self.mb_type=='mb_monthly':
+            if self.mb_type == 'mb_real_daily' or self.mb_type == 'mb_monthly':
                 # even if there is temp_std inside the dataset, we won't use
                 # it for these mb_types
                 self.temp_std = np.NaN
             else:
                 try:
-                    self.temp_std = xr_nc['temp_std'].values #.variables[:]
+                    self.temp_std = xr_nc['temp_std'].values
                 except KeyError:
-                    text = 'The applied climate has no temp std, do e.g. \
-                        oggm.shop.ecmwf.process_ecmwf_data(gd, dataset = "ERA5dr")'
+                    text = ('The applied climate has no temp std, do e.g.'
+                            'oggm.shop.ecmwf.process_ecmwf_data'
+                            '(gd, dataset="ERA5dr")')
+
                     raise InvalidParamsError(text)
-                    
+
             # goal is to get self.years/self.months in hydro_years
-            if self.mb_type !='mb_real_daily':
+            if self.mb_type != 'mb_real_daily':
                 time = xr_nc.time
                 ny, r = divmod(len(time), 12)
                 if r != 0:
@@ -560,10 +561,10 @@ class mb_modules(MassBalanceModel):
 
             elif self.mb_type == 'mb_real_daily':
                 # use pandas to convert month/year to hydro_years
-                # this has to be done differently than above because not 
+                # this has to be done differently than above because not
                 # every month, year has the same amount of days
                 pd_test = pd.DataFrame(xr_nc.time.to_series().dt.year.values,
-                                       columns = ['year'])
+                                       columns=['year'])
                 pd_test.index = xr_nc.time.to_series().values
                 pd_test['month'] = xr_nc.time.to_series().dt.month.values
                 pd_test['hydro_year'] = np.NaN
@@ -571,28 +572,28 @@ class mb_modules(MassBalanceModel):
                 # as chosen from the gdir climate file
                 # default 10 for 'nh', 4 for 'sh'
                 hydro_month_start = int(xr_nc.time[0].dt.month.values)
-                if hydro_month_start==1:
+                if hydro_month_start == 1:
                     # hydro_year corresponds to normal year
-                    pd_test.loc[pd_test.index.month>=hydro_month_start,
-                            'hydro_year'] = pd_test['year']
+                    pd_test.loc[pd_test.index.month >= hydro_month_start,
+                                'hydro_year'] = pd_test['year']
                 else:
-                    pd_test.loc[pd_test.index.month<hydro_month_start,
-                            'hydro_year'] = pd_test['year']
+                    pd_test.loc[pd_test.index.month < hydro_month_start,
+                                'hydro_year'] = pd_test['year']
                     # otherwise, those days with a month>=hydro_month_start
                     # belong to the next hydro_year
-                    pd_test.loc[pd_test.index.month>=hydro_month_start,
-                            'hydro_year'] = pd_test['year']+1
+                    pd_test.loc[pd_test.index.month >= hydro_month_start,
+                                'hydro_year'] = pd_test['year']+1
                 # month_hydro is 1 if it is hydro_month_start
-                month_hydro = pd_test['month'].values +(12-hydro_month_start+1)
-                month_hydro[month_hydro >12] = month_hydro[month_hydro >12] -12 
+                month_hydro = pd_test['month'].values+(12-hydro_month_start+1)
+                month_hydro[month_hydro > 12] += -12
                 pd_test['hydro_month'] = month_hydro
                 pd_test = pd_test.astype('int')
                 self.years = pd_test['hydro_year'].values
-                ny = self.years[-1] - self.years[0] +1
+                ny = self.years[-1] - self.years[0]+1
                 self.months = pd_test['hydro_month'].values
             # Read timeseries
-            self.temp = xr_nc['temp'].values 
-            self.prcp = xr_nc['prcp'].values * prcp_fac 
+            self.temp = xr_nc['temp'].values
+            self.prcp = xr_nc['prcp'].values * prcp_fac
 
             # lapse rate (temperature gradient)
             if (self.grad_type == 'var' or self.grad_type == 'var_an_cycle'):
@@ -600,53 +601,62 @@ class mb_modules(MassBalanceModel):
                     grad = xr_nc['gradient'].values
                     # Security for stuff that can happen with local gradients
                     g_minmax = temp_local_gradient_bounds
-                    
-                    # if gradient is not a number, or positive/negative infinity, use the default gradient
-                    grad = np.where(~np.isfinite(grad), default_grad, grad) 
-                    
-                    # if outside boundaries of default -0.009 and above -0.003 -> use the boundaries instead
+
+                    # if gradient is not a number, or positive/negative
+                    # infinity, use the default gradient
+                    grad = np.where(~np.isfinite(grad), default_grad, grad)
+
+                    # if outside boundaries of default -0.009 and above
+                    # -0.003 -> use the boundaries instead
                     grad = clip_array(grad, g_minmax[0], g_minmax[1])
-                
+
                     if self.grad_type == 'var_an_cycle':
-                    # if we want constant lapse rates over the years
-                    # that change over the annual cycle, but not over time
-                        if self.mb_type=='mb_real_daily':
-                            grad = xr_nc['gradient'].groupby('time.month').mean().values
+                        # if we want constant lapse rates over the years
+                        # that change over the annual cycle, but not over time
+                        if self.mb_type == 'mb_real_daily':
+                            grad_gb = xr_nc['gradient'].groupby('time.month')
+                            grad = grad_gb.mean().values
                             g_minmax = temp_local_gradient_bounds
-                            
-                            # if gradient is not a number, or positive/negative infinity, use the default gradient
-                            grad = np.where(~np.isfinite(grad), default_grad, grad) 
-                            
-                            # if outside boundaries of default -0.009 and above -0.003 -> use the boundaries instead
+
+                            # if gradient is not a number, or positive/negative
+                            # infinity, use the default gradient
+                            grad = np.where(~np.isfinite(grad), default_grad,
+                                            grad)
+
+                            # if outside boundaries of default -0.009 and above
+                            # -0.003 -> use the boundaries instead
                             grad = clip_array(grad, g_minmax[0], g_minmax[1])
-                            
-                            stack_grad = grad.reshape(-1,12)
-                            grad = np.tile(stack_grad.mean(axis=0),ny)
-                            reps = xr_nc.time[xr_nc.time.dt.day==1].dt.daysinmonth
+
+                            stack_grad = grad.reshape(-1, 12)
+                            grad = np.tile(stack_grad.mean(axis=0), ny)
+                            reps_day1 = xr_nc.time[xr_nc.time.dt.day == 1]
+                            reps = reps_day1.dt.daysinmonth
                             grad = np.repeat(grad, reps)
-    
+
                         else:
-                            stack_grad = grad.reshape(-1,12)
-                            grad = np.tile(stack_grad.mean(axis=0),ny)
+                            stack_grad = grad.reshape(-1, 12)
+                            grad = np.tile(stack_grad.mean(axis=0), ny)
                 except KeyError:
-                    text = 'there is no gradient available in chosen climate \
-                        file, try instead e.g. ERA5_daily or ERA5dr e.g.\
-                    oggm.shop.ecmwf.process_ecmwf_data(gd, dataset="ERA5dr") '
+                    text = ('there is no gradient available in chosen climate'
+                            'file, try instead e.g. ERA5_daily or ERA5dr e.g.'
+                            'oggm.shop.ecmwf.process_ecmwf_data'
+                            '(gd, dataset="ERA5dr")')
+
                     raise InvalidParamsError(text)
-                    
+
             elif self.grad_type == 'cte':
                 # if grad_type is chosen cte, we use the default_grad!
                 grad = self.prcp * 0 + default_grad
             else:
-                raise InvalidParamsError('grad_type can be either cte,\
-                                         var or var_an_cycle')
+                raise InvalidParamsError('grad_type can be either cte,'
+                                         'var or var_an_cycle')
             self.grad = grad
             self.ref_hgt = xr_nc.ref_hgt
             self.ys = self.years[0] if ys is None else ys
             self.ye = self.years[-1] if ye is None else ye
 
-    def _get_climate(self, heights, climate_type, year = None):
-        """Climate information at given heights. 
+    def _get_climate(self, heights, climate_type, year=None):
+        """Climate information at given heights.
         year has to be given as float hydro year from what the month is taken,
         hence year 2000 -> y=2000, m = 1, & year = 2000.09, y=2000, m=2 ...
         which corresponds to the real year 1999 an months October or November
@@ -654,10 +664,10 @@ class mb_modules(MassBalanceModel):
 
         Note that prcp is corrected with the precipitation factor and that
         all other model biases (temp and prcp) are applied.
-        
+
         same as in OGGM default except that tempformelt is computed by
         self._get_tempformelt
-        
+
         Parameters
         -------
         heights : np.array or list
@@ -665,7 +675,6 @@ class mb_modules(MassBalanceModel):
         climate_type : str
             either 'monthly' or 'annual', if annual floor of year is used,
             if monthly float year is converted into month and year
-            
 
         Returns
         -------
@@ -679,14 +688,13 @@ class mb_modules(MassBalanceModel):
             raise ValueError('year {} out of the valid time bounds: '
                              '[{}, {}]'.format(y, self.ys, self.ye))
 
-
-        if self.mb_type =='mb_real_daily' or climate_type =='annual':
+        if self.mb_type == 'mb_real_daily' or climate_type == 'annual':
             if climate_type == 'annual':
                 pok = np.where(self.years == year)[0]
                 if len(pok) < 1:
                     raise ValueError('Year {} not in record'.format(int(year)))
             else:
-                pok = np.where((self.years == y) & (self.months == m))[0]  
+                pok = np.where((self.years == y) & (self.months == m))[0]
                 if len(pok) < 28:
                     warnings.warn('something goes wrong with amount of entries\
                                   per month for mb_real_daily')
@@ -701,7 +709,7 @@ class mb_modules(MassBalanceModel):
         # Compute temp and tempformelt (temperature above melting threshold)
         heights = np.asarray(heights)
         npix = len(heights)
-        if self.mb_type =='mb_real_daily' or climate_type =='annual':
+        if self.mb_type == 'mb_real_daily' or climate_type == 'annual':
             grad_temp = np.atleast_2d(igrad).repeat(npix, 0)
             if len(pok) != 12 and self.mb_type != 'mb_real_daily':
                 warnings.warn('something goes wrong with amount of entries\
@@ -709,121 +717,122 @@ class mb_modules(MassBalanceModel):
             grad_temp *= (heights.repeat(len(pok)).reshape(grad_temp.shape) -
                           self.ref_hgt)
             temp2d = np.atleast_2d(itemp).repeat(npix, 0) + grad_temp
-            
+
             # temp_for_melt is computed separately depending on mb_type
             temp2dformelt = self._get_tempformelt(temp2d, pok)
-         
+
             # Compute solid precipitation from total precipitation
             prcp = np.atleast_2d(iprcp).repeat(npix, 0)
             fac = 1 - (temp2d - self.t_solid) / (self.t_liq - self.t_solid)
             prcpsol = prcp * clip_array(fac, 0, 1)
-            return temp2d, temp2dformelt, prcp, prcpsol    
+            return temp2d, temp2dformelt, prcp, prcpsol
 
         else:
             temp = np.ones(npix) * itemp + igrad * (heights - self.ref_hgt)
-        
+
             # temp_for_melt is computed separately depending on mb_type
-            tempformelt = self._get_tempformelt(temp,  pok)
-            
-           
+            tempformelt = self._get_tempformelt(temp, pok)
             prcp = np.ones(npix) * iprcp
             fac = 1 - (temp - self.t_solid) / (self.t_liq - self.t_solid)
             prcpsol = prcp * clip_array(fac, 0, 1)
 
             return temp, tempformelt, prcp, prcpsol
-        
+
     def _get_2d_monthly_climate(self, heights, year=None):
         # first get the climate data
         Warning('Attention: this has not been tested enough to be sure that \
         it works')
         if self.mb_type == 'mb_real_daily':
-            return self._get_climate(heights, 'monthly', year = year)
+            return self._get_climate(heights, 'monthly', year=year)
         else:
             raise InvalidParamsError('_get_2d_monthly_climate works only\
                                      with mb_real_daily as mb_type!!!')
+
     def get_monthly_climate(self, heights, year=None):
         # first get the climate data
         Warning('Attention: this has not been tested enough to be sure that \
                 it works')
         if self.mb_type == 'mb_real_daily':
             t, tfmelt, prcp, prcpsol = self._get_climate(heights, 'monthly',
-                                                         year = year)
+                                                         year=year)
             return (t.mean(axis=1), tfmelt.sum(axis=1),
-                prcp.sum(axis=1), prcpsol.sum(axis=1))
+                    prcp.sum(axis=1), prcpsol.sum(axis=1))
         else:
-            return self._get_climate(heights, 'monthly', year = year)
-                            
-         # if it is mb_real_daily, the data has daily resolution
-                                                                   
+            return self._get_climate(heights, 'monthly', year=year)
+            # if it is mb_real_daily, the data has daily resolution
+
     def _get_2d_annual_climate(self, heights, year):
-        return self._get_climate(heights, 'annual', year = year)
-   
-    
-    # If I also want to use this outside of the class because 
+        return self._get_climate(heights, 'annual', year=year)
+
+    # If I also want to use this outside of the class because
     # (e.g. in climate.py), I have to change this again and remove the self...
-    # and somehow there is aproblem if I put not self in 
-    #_get_tempformelt when it is inside the class
+    # and somehow there is aproblem if I put not self in
+    # _get_tempformelt when it is inside the class
+
     def _get_tempformelt(self, temp, pok):
         """ Helper function to compute tempformelt to avoid code duplication
-        in get_monthly_climate() and _get2d_annual_climate() 
-        
+        in get_monthly_climate() and _get2d_annual_climate()
+
         If using this again outside of this class, need to remove the "self",
         such as for 'mb_climate_on_height' in climate.py, that has no self....
         (would need to change temp, t_melt ,temp_std, mb_type, N, loop)
-        
+
         Input: stuff that is different for the different methods
             temp: temperature time series
             pok: indices of time series
-        
+
         Returns
         -------
         (tempformelt)
         """
-        
+
         tempformelt_without_std = temp - self.t_melt
-    
+
         # computations change only if 'mb_daily' as mb_type!
-        if self.mb_type =='mb_monthly' or self.mb_type == 'mb_real_daily':        
-            tempformelt = tempformelt_without_std 
-        elif self.mb_type =='mb_daily':
-            
+        if self.mb_type == 'mb_monthly' or self.mb_type == 'mb_real_daily':
+            tempformelt = tempformelt_without_std
+        elif self.mb_type == 'mb_daily':
+
             itemp_std = self.temp_std[pok]
-                
+
             tempformelt_with_std = np.full(np.shape(tempformelt_without_std),
                                            np.NaN)
-            # matrix with N values that are distributed around 0 
-            # showing how much fake 'daily' values vary from the mean 
+            # matrix with N values that are distributed around 0
+            # showing how much fake 'daily' values vary from the mean
             z_scores_mean = stats.norm.ppf(np.arange(1/self.N-1/(2*self.N),
-                                                     1,1/self.N))
-    
+                                                     1, 1/self.N))
+
             z_std = np.matmul(np.atleast_2d(z_scores_mean).T,
-                              np.atleast_2d(itemp_std)) 
-            
-            # there are two possibilities, 
+                              np.atleast_2d(itemp_std))
+
+            # there are two possibilities,
             # not using the loop is most of the times faster
-            if self.loop == False:
+            if self.loop is False:
                 # without the loop: but not much faster ..
-                tempformelt_daily = np.atleast_3d(z_std) + np.atleast_3d(tempformelt_without_std).T   
-                clip_min(tempformelt_daily,0,out=tempformelt_daily)
-                tempformelt_with_std = tempformelt_daily.mean(axis=0).T 
+                tfm_daily_ = np.atleast_3d(tempformelt_without_std).T
+                tempformelt_daily = tfm_daily_ + np.atleast_3d(z_std)
+                clip_min(tempformelt_daily, 0, out=tempformelt_daily)
+                tempformelt_with_std = tempformelt_daily.mean(axis=0).T
             elif self.loop:
-                tempformelt_with_std = np.full(np.shape(tempformelt_without_std),np.NaN)
+                shape_tfm = np.shape(tempformelt_without_std)
+                tempformelt_with_std = np.full(shape_tfm, np.NaN)
                 z_std = np.matmul(np.atleast_2d(z_scores_mean).T,
                                   np.atleast_2d(itemp_std))
                 for h in np.arange(0, np.shape(tempformelt_without_std)[0]):
-                    h_tempformelt_daily =  z_std + np.atleast_2d(tempformelt_without_std[h,:]) 
-                    clip_min(h_tempformelt_daily,0,out=h_tempformelt_daily)
-                    h_tempformelt_monthly = h_tempformelt_daily.mean(axis=0) 
-                    tempformelt_with_std[h,:]  = h_tempformelt_monthly  
+                    h_tfm_daily_ = np.atleast_2d(tempformelt_without_std[h, :])
+                    h_tempformelt_daily = h_tfm_daily_ + z_std
+                    clip_min(h_tempformelt_daily, 0, out=h_tempformelt_daily)
+                    h_tempformelt_monthly = h_tempformelt_daily.mean(axis=0)
+                    tempformelt_with_std[h, :] = h_tempformelt_monthly
             tempformelt = tempformelt_with_std
 
         else:
             raise InvalidParamsError('mb_type can only be "mb_monthly,\
                                      mb_daily or mb_real_daily" ')
-        #  replace all values below zero to zero    
+        #  replace all values below zero to zero
         clip_min(tempformelt, 0, out=tempformelt)
 
-        return tempformelt 
+        return tempformelt
 
     # same as in OGGM default
     def get_annual_climate(self, heights, year=None):
@@ -839,38 +848,38 @@ class mb_modules(MassBalanceModel):
         t, tfmelt, prcp, prcpsol = self._get_2d_annual_climate(heights, year)
         return (t.mean(axis=1), tfmelt.sum(axis=1),
                 prcp.sum(axis=1), prcpsol.sum(axis=1))
-        
 
     def get_monthly_mb(self, heights, year=None, **kwargs):
         """ computes annual mass balance in kg /m² /month
-        
+
         Attention year is here in hydro float year
 
         """
-        # get_monthly_mb and get_annual_mb are only different 
+        # get_monthly_mb and get_annual_mb are only different
         # to OGGM default for mb_real_daily
-    
+
         if self.mb_type == 'mb_real_daily':
             # get 2D values, dependencies on height and time (days)
-            _, temp2dformelt, _, prcpsol = self._get_2d_monthly_climate(heights,
-                                                                        year)
+            out = self._get_2d_monthly_climate(heights, year)
+            _, temp2dformelt, _, prcpsol = out
             # 1 / (days per month)
-            fact = 1/len(prcpsol.T) 
-            # to have the same unit of mu_star, which is 
+            fact = 1/len(prcpsol.T)
+            # to have the same unit of mu_star, which is
             # the monthly temperature sensitivity (kg /m² /mth /K),
             mb_daily = prcpsol - self.mu_star * temp2dformelt * fact
 
-            mb_month = np.sum(mb_daily, axis =1 )
+            mb_month = np.sum(mb_daily, axis=1)
             # more correct than using a mean value for days in a month
-            warnings.warn('get_monthly_mb has not been tested enough, there might be a problem'
-                          'with SEC_IN_MONTH..., see test_monthly_glacier_massbalance()')
+            warnings.warn('get_monthly_mb has not been tested enough,'
+                          ' there might be a problem with SEC_IN_MONTH'
+                          '.., see test_monthly_glacier_massbalance()')
 
         else:
             # get 1D values for each height, no dependency on days
             _, tmelt, _, prcpsol = self.get_monthly_climate(heights, year=year)
             mb_month = prcpsol - self.mu_star * tmelt
-            
-        # bias is in general, so SEC_IN_MONTH .. can be used 
+
+        # bias is in general, so SEC_IN_MONTH .. can be used
         mb_month -= self.bias * self.SEC_IN_MONTH / self.SEC_IN_YEAR
         # this is for mb_daily otherwise it gives the wrong shape
         mb_month = mb_month.flatten()
@@ -879,21 +888,20 @@ class mb_modules(MassBalanceModel):
 
     def get_annual_mb(self, heights, year=None, **kwargs):
         """ computes annual mass balance in kg /m² /second """
-        # get_monthly_mb and get_annual_mb are only different 
+        # get_monthly_mb and get_annual_mb are only different
         # to OGGM default for mb_real_daily
 
         _, temp2dformelt, _, prcpsol = self._get_2d_annual_climate(heights,
                                                                    year)
-        # *12/daysofthisyear in order to have the same unit of mu_star, which is 
-        # the monthly temperature sensitivity (kg /m² /mth /K),
+        # *12/daysofthisyear in order to have the same unit of mu_star, which
+        # is the monthly temperature sensitivity (kg /m² /mth /K),
         if self.mb_type == 'mb_real_daily':
             # in this case we have the temp2dformelt for each day
             # but self.mu_star is in per month -> divide trough days/month
             # more correct than using a mean value for days in a year
-            fact = 12/len(prcpsol.T) 
+            fact = 12/len(prcpsol.T)
         else:
             fact = 1
         mb_annual = np.sum(prcpsol - self.mu_star * temp2dformelt*fact,
-           axis=1) 
+                           axis=1)
         return (mb_annual - self.bias) / self.SEC_IN_YEAR / self.rho
-

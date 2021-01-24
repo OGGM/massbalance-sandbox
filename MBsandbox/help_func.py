@@ -10,9 +10,10 @@ compute performance statistics
 """
 import scipy
 import matplotlib.pyplot as plt
-
 import numpy as np
-from MBsandbox.mbmod_daily_oneflowline import (mb_modules)
+
+# imports from local MBsandbox package modules
+from MBsandbox.mbmod_daily_oneflowline import mb_modules
 
 
 # %%

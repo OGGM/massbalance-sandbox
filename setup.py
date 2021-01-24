@@ -1,7 +1,9 @@
 
 """
 
-adapted from https://github.com/fmaussion/scispack; https://packaging.python.org/en/latest/distributing.html; https://github.com/pypa/sampleproject
+adapted from https://github.com/fmaussion/scispack;
+https://packaging.python.org/en/latest/distributing.html;
+https://github.com/pypa/sampleproject
 
 """
 
@@ -17,7 +19,6 @@ here = path.abspath(path.dirname(__file__))
 # Get the long description from the README file
 with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
-
 
 
 # %%
@@ -38,7 +39,7 @@ setup(
     # This field corresponds to the "Description-Content-Type" metadata field:
     # https://packaging.python.org/specifications/core-metadata/#description-content-type-optional
     long_description_content_type='text/markdown',  # Optional (see note above)
-    url='https://github.com/OGGM/massbalance-sandbox',  
+    url='https://github.com/OGGM/massbalance-sandbox',
 
     # This should be your name or the name of the organization which owns the
     # project.
@@ -92,14 +93,17 @@ setup(
     #
     # For an analysis of "install_requires" vs pip's requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
-    
-    # the newest oggm developer version has to be installed in order that this works 
-    # this needs to be updated  but I have to see how ... 
-    # I would prefer to just give a requirements.txt file
-    # I am not sure if I should write here everything down?
-    # I will look for a method how I can automatically find out which packages are necessary
-    # 
-    install_requires= [], #['oggm'],  # Optional
+
+    # the newest oggm developer version has to be installed in order that
+    # this works
+    install_requires=['numpy', 'pytest', 'matplotlib', 'scipy', 'pandas',
+                      'xarray',
+                      'netCDF4', 'shapely', 'tables', 'geopandas', 'salem',
+                      'joblib', 'descartes'],  # 'oggm'
+    # internal packages: os, ast, time, 'functools', 'setuptools',
+    # 'codecs','datetime','warnings''logging',
+    # practical to have jupyterlab to see docs
+    # conda install -c conda-forge jupyterlab
 
     # List additional groups of dependencies here (e.g. development
     # dependencies). Users will be able to install these using the "extras"
@@ -110,8 +114,8 @@ setup(
     # Similar to `install_requires` above, these must be valid existing
     # projects.
     extras_require={  # Optional
-        #'test': ['pytest'],
-        #'docs': ['ast']
+        # 'test': ['pytest'],
+        # 'docs': ['ast']
     },
 
     python_requires='>=3.7',
@@ -134,16 +138,13 @@ setup(
     #
     # For example, the following would provide a command called `sample` which
     # executes the function `main` from this package when invoked:
-    #entry_points={  # Optional
+    # entry_points={  # Optional
     #    'console_scripts': [
     #        'scispack=scispack.cli:main',
     #    ],
-    #},
-    #entry_points={  # Optional
-       # 'console_scripts': [
-       #     'massbalance-sandbox=massbalance-sandbox:main',
-       # ],
-    #},
+    # },
+    # entry_points={  # Optional
+    # },
     # List additional URLs that are relevant to your project as a dict.
     #
     # This field corresponds to the "Project-URL" metadata fields:
@@ -158,6 +159,3 @@ setup(
         'Source': 'https://github.com/fmaussion/scispack',
     },
 )
-
-# %%
-    
