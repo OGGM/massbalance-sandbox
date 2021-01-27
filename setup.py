@@ -99,7 +99,8 @@ setup(
     install_requires=['numpy', 'pytest', 'matplotlib', 'scipy', 'pandas',
                       'xarray',
                       'netCDF4', 'shapely', 'tables', 'geopandas', 'salem',
-                      'joblib', 'descartes'],  # 'oggm'
+                      'joblib', 'descartes',
+                      'rasterio', 'motionless', 'scikit-image'],  # 'oggm'
     # internal packages: os, ast, time, 'functools', 'setuptools',
     # 'codecs','datetime','warnings''logging',
     # practical to have jupyterlab to see docs
@@ -156,6 +157,5 @@ setup(
     # what's used to render the link text on PyPI.
     project_urls={  # Optional
         'Bug Reports': 'https://github.com/OGGM/massbalance-sandbox/issues',
-        'Source': 'https://github.com/fmaussion/scispack',
     },
 )
