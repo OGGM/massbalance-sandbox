@@ -378,6 +378,12 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
     # but is used, so far, only for ERA5_daily as source dataset ..
 
 
+# TODO:
+# - name: TIModel? + DDFModel?
+# - parameter:
+#     - mu -> melt_f
+#     - bias -> residual (sign maybe opposite OGGM "MB terms + residual"
+#
 class mb_modules(MassBalanceModel):
     """Different mass balance modules compatible to OGGM with one flowline
 
@@ -596,7 +602,7 @@ class mb_modules(MassBalanceModel):
             self.prcp = xr_nc['prcp'].values * prcp_fac
 
             # lapse rate (temperature gradient)
-            if (self.grad_type == 'var' or self.grad_type == 'var_an_cycle'):
+            if self.grad_type == 'var' or self.grad_type == 'var_an_cycle':
                 try:
                     grad = xr_nc['gradient'].values
                     # Security for stuff that can happen with local gradients
@@ -712,8 +718,8 @@ class mb_modules(MassBalanceModel):
         if self.mb_type == 'mb_real_daily' or climate_type == 'annual':
             grad_temp = np.atleast_2d(igrad).repeat(npix, 0)
             if len(pok) != 12 and self.mb_type != 'mb_real_daily':
-                warnings.warn('something goes wrong with amount of entries\
-                              per year')
+                warnings.warn('something goes wrong with amount of entries'
+                              'per year')
             grad_temp *= (heights.repeat(len(pok)).reshape(grad_temp.shape) -
                           self.ref_hgt)
             temp2d = np.atleast_2d(itemp).repeat(npix, 0) + grad_temp
@@ -740,8 +746,8 @@ class mb_modules(MassBalanceModel):
 
     def _get_2d_monthly_climate(self, heights, year=None):
         # first get the climate data
-        Warning('Attention: this has not been tested enough to be sure that \
-        it works')
+        Warning('Attention: this has not been tested enough to be sure that '
+                'it works')
         if self.mb_type == 'mb_real_daily':
             return self._get_climate(heights, 'monthly', year=year)
         else:
@@ -809,11 +815,11 @@ class mb_modules(MassBalanceModel):
             # not using the loop is most of the times faster
             if self.loop is False:
                 # without the loop: but not much faster ..
-                tfm_daily_ = np.atleast_3d(tempformelt_without_std).T
-                tempformelt_daily = tfm_daily_ + np.atleast_3d(z_std)
+                tempformelt_daily = np.atleast_3d(tempformelt_without_std).T + \
+                                    np.atleast_3d(z_std)
                 clip_min(tempformelt_daily, 0, out=tempformelt_daily)
                 tempformelt_with_std = tempformelt_daily.mean(axis=0).T
-            elif self.loop:
+            else:
                 shape_tfm = np.shape(tempformelt_without_std)
                 tempformelt_with_std = np.full(shape_tfm, np.NaN)
                 z_std = np.matmul(np.atleast_2d(z_scores_mean).T,

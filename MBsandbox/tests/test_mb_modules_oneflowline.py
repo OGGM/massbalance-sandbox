@@ -26,7 +26,6 @@ import oggm
 from oggm.core import massbalance
 from oggm import utils, workflow, tasks, cfg
 from oggm.cfg import SEC_IN_DAY, SEC_IN_YEAR
-from oggm.core.flowline import (FluxBasedModel, FlowlineModel)
 from oggm.exceptions import InvalidParamsError
 
 
@@ -36,30 +35,6 @@ from MBsandbox.help_func import (compute_stat, minimize_bias,
 
 from MBsandbox.mbmod_daily_oneflowline import (process_era5_daily_data,
                                                mb_modules)
-
-
-FluxBasedModel = partial(FluxBasedModel, inplace=True)
-FlowlineModel = partial(FlowlineModel, inplace=True)
-# %%
-cfg.initialize()
-test_dir = '/home/lilianschuster/Schreibtisch/PhD/oggm_files/MBsandbox_tests'
-if not os.path.exists(test_dir):
-    test_dir = utils.gettempdir(dirname='OGGM_MBsandbox_test',
-                                reset=True)
-# %%
-cfg.PATHS['working_dir'] = test_dir
-base_url_ = 'https://cluster.klima.uni-bremen.de/~fmaussion'
-base_url = base_url_ + '/gdirs/prepro_l2_202010/elevbands_fl_with_consensus'
-
-# %%
-# maybe put this into a function???
-df = utils.get_rgi_glacier_entities(['RGI60-11.00897'])
-gdirs = workflow.init_glacier_directories(df, from_prepro_level=2,
-                                          prepro_border=40,
-                                          prepro_base_url=base_url,
-                                          prepro_rgi_version='62')
-gdir = gdirs[0]
-
 
 # optimal values for HEF of mu_star for cte lapse rates
 mu_star_opt_cte = {'mb_monthly': 213.540352,
@@ -71,10 +46,31 @@ mu_star_opt_var = {'mb_monthly': 195.304843,
                    'mb_real_daily': 159.901181}
 # precipitation factor
 pf = 2.5
-# %%
 
 
-def test_hydro_years_HEF():
+@pytest.fixture
+def gdir():
+
+    cfg.initialize()
+
+    test_dir = '/home/lilianschuster/Schreibtisch/PhD/oggm_files/MBsandbox_tests'
+    if not os.path.exists(test_dir):
+        test_dir = utils.gettempdir(dirname='OGGM_MBsandbox_test',
+                                    reset=True)
+
+    cfg.PATHS['working_dir'] = test_dir
+    base_url = ('https://cluster.klima.uni-bremen.de/~oggm/gdirs/oggm_v1.4/'
+                'L1-L2_files/elev_bands')
+
+    df = ['RGI60-11.00897']
+    gdirs = workflow.init_glacier_directories(df, from_prepro_level=2,
+                                              prepro_border=10,
+                                              prepro_base_url=base_url,
+                                              prepro_rgi_version='62')
+    return gdirs[0]
+
+
+def test_hydro_years_HEF(gdir):
     # only very basic test, the other stuff is done in oggm man basis
     # test if it also works for hydro_month ==1, necessary for geodetic mb
     # if hydro_month ==1, and msm start in 1979, then hydro_year should also
@@ -99,11 +95,10 @@ def test_hydro_years_HEF():
 
 
 # %%
-def test_minimize_bias():
+def test_minimize_bias(gdir):
 
     # important to initialize again, otherwise hydro_month_nh=1
     # from test_hydro_years_HEF...
-    cfg.initialize()
     # just checks if minimisation gives always same results
     grad_type = 'cte'
     N = 2000
@@ -139,10 +134,9 @@ def test_minimize_bias():
 # %%
 
 
-def test_optimize_std_quot_brentq():
+def test_optimize_std_quot_brentq(gdir):
     # check if double optimisation of bias and std_quotient works
 
-    cfg.initialize()
     grad_type = 'cte'
     N = 2000
     loop = False
@@ -184,10 +178,10 @@ def test_optimize_std_quot_brentq():
 # %%
 
 
-def test_mb_modules_monthly():
+def test_mb_modules_monthly(gdir):
     # check if massbalance.PastMassBalance equal to mb_modules with cte
     # gradient and mb_monthly as options for lapse rate mb_type
-    cfg.initialize()
+
     mu_star_opt_cte_var = 195.5484547754791
     # if I use ERA5dr in PastMassBalance, it applies automatically the
     # gradient that changes with time and location
@@ -227,15 +221,12 @@ def test_mb_modules_monthly():
                                                         year=mbdf.index.values)
 
         assert_allclose(tot_mb, tot_mb_default, rtol=1e-4)
-test_mb_modules_monthly()
-# %%
 
 
 # I use here the exact same names as in test_models from OGGM.
 # class TestInitPresentDayFlowline:
 # but somehow the test for ref_mb_profile() is not equal
-def test_present_time_glacier_massbalance():
-    cfg.initialize()
+def test_present_time_glacier_massbalance(gdir):
 
     # check if area of  HUSS flowlines corresponds to the rgi area
     h, w = gdir.get_inversion_flowline_hw()
@@ -323,12 +314,9 @@ def test_present_time_glacier_massbalance():
 # %%
 
 
-def test_monthly_glacier_massbalance():
+def test_monthly_glacier_massbalance(gdir):
     # TODO: problem with that, monthly and annual MB not exactly the same!!!
     # I think there is a problem with SEC_IN_MONTH/SEC_IN_YEAR ...
-
-    # this could be optimised and included in the above tests
-    cfg.initialize()
 
     # do this for all model types
     # ONLY TEST it for ERA5dr or ERA5_daily!!!
@@ -398,7 +386,7 @@ def test_monthly_glacier_massbalance():
 # %%
 
 
-def test_loop():
+def test_loop(gdir):
     # tests whether ERA5dr works better with or without the loop in mb_daily
     # tests that both option give same results and in case that default option
     # (no loop) is 30% slower, it raises an error
@@ -473,12 +461,11 @@ def test_loop():
 # %%
 
 
-def test_N():
+def test_N(gdir):
     # tests whether modelled mb_daily massbalances of different values of N
     # is similar to observed mass balances
 
     # this could be optimised and included in the above tests
-    cfg.initialize()
     climate = 'ERA5dr'
     mb_type = 'mb_daily'
     cfg.PARAMS['baseline_climate'] = 'ERA5dr'

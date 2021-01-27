@@ -25,7 +25,7 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 setup(
     name='MBsandbox',
     version='0.0.1',  # Required
-    description='different mass balance models for OGGM',  # Required
+    description='Better mass balance models for OGGM',  # Required
     long_description=long_description,  # Optional
 
     # Denotes that our long_description is in Markdown; valid values are
@@ -96,15 +96,10 @@ setup(
 
     # the newest oggm developer version has to be installed in order that
     # this works
-    install_requires=['numpy', 'pytest', 'matplotlib', 'scipy', 'pandas',
-                      'xarray',
-                      'netCDF4', 'shapely', 'tables', 'geopandas', 'salem',
-                      'joblib', 'descartes',
-                      'rasterio', 'motionless', 'scikit-image'],  # 'oggm'
-    # internal packages: os, ast, time, 'functools', 'setuptools',
-    # 'codecs','datetime','warnings''logging',
-    # practical to have jupyterlab to see docs
-    # conda install -c conda-forge jupyterlab
+    install_requires=[],
+    # 'numpy', 'pytest', 'matplotlib', 'scipy', 'pandas',
+    # 'xarray', 'netCDF4', 'shapely', 'tables', 'geopandas', 'salem',
+    # 'joblib', 'descartes','rasterio', 'motionless', 'scikit-image' 'oggm'
 
     # List additional groups of dependencies here (e.g. development
     # dependencies). Users will be able to install these using the "extras"
