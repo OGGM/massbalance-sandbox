@@ -6,7 +6,6 @@ Created on Thu Dec 17 18:34:35 2020
 @author: lilianschuster
 """
 import warnings
-import os
 import numpy as np
 import pytest
 import xarray as xr
@@ -14,7 +13,6 @@ from numpy.testing import assert_allclose
 import oggm
 
 # imports from oggm
-from oggm import utils, workflow, cfg
 from oggm.exceptions import InvalidParamsError
 from oggm.shop.ecmwf import get_ecmwf_file
 
@@ -25,23 +23,7 @@ warnings.filterwarnings("once", category=DeprecationWarning)
 # %%
 
 
-def test_process_era5_daily_data():
-
-    cfg.initialize()
-    test_dir = '/home/lilianschuster/Schreibtisch/PhD/oggm_files/tests'
-    if not os.path.exists(test_dir):
-        test_dir = utils.gettempdir(dirname='OGGM_era5_daily_test',
-                                    reset=True)
-    cfg.PATHS['working_dir'] = test_dir
-    b_url_ = 'https://cluster.klima.uni-bremen.de/~fmaussion'
-    base_url = b_url_ + '/gdirs/prepro_l2_202010/elevbands_fl_with_consensus'
-
-    df = utils.get_rgi_glacier_entities(['RGI60-11.00897'])
-    gdirs = workflow.init_glacier_directories(df, from_prepro_level=2,
-                                              prepro_border=40,
-                                              prepro_base_url=base_url,
-                                              prepro_rgi_version='62')
-    gdir = gdirs[0]
+def test_process_era5_daily_data(gdir):
 
     process_era5_daily_data(gdir, y0=1979, y1=2018)
 

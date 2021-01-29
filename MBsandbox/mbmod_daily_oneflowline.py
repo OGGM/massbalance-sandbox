@@ -5,7 +5,7 @@ Created on Thu Dec 24 12:28:37 2020
 
 @author: lilianschuster
 
-different mb_module types added that are working with the Huss flowlines
+different temperature index mass balance types added that are working with the Huss flowlines
 """
 import numpy as np
 import pandas as pd
@@ -20,7 +20,7 @@ import logging
 
 # imports from oggm
 from oggm import entity_task
-from oggm import cfg
+from oggm import cfg, utils
 from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH
 from oggm.utils import (floatyear_to_date, ncDataset,
                         clip_min, clip_array)
@@ -380,24 +380,21 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
 
 # TODO:
 # - name: TIModel? + DDFModel?
-# - parameter:
-#     - mu -> melt_f
-#     - bias -> residual (sign maybe opposite OGGM "MB terms + residual"
-#
-class mb_modules(MassBalanceModel):
+class TIModel(MassBalanceModel):
     """Different mass balance modules compatible to OGGM with one flowline
 
     so far this is only tested for the Huss flowlines
     """
 
-    def __init__(self, gdir, mu_star, bias=0,
-                 mb_type='mb_daily', N=10000, loop=False,
+    def __init__(self, gdir, melt_f, residual=0,
+                 mb_type='mb_daily', N=100, loop=False,
                  grad_type='cte', filename='climate_historical',
                  input_filesuffix='',
                  repeat=False, ys=None, ye=None,
                  t_solid=0, t_liq=2, t_melt=0, prcp_fac=2.5,
                  default_grad=-0.0065,
                  temp_local_gradient_bounds=[-0.009, -0.003],
+                 # check_climate=True,
                  SEC_IN_YEAR=SEC_IN_YEAR,
                  SEC_IN_MONTH=SEC_IN_MONTH
                  ):
@@ -406,19 +403,21 @@ class mb_modules(MassBalanceModel):
         ----------
         gdir : GlacierDirectory
             the glacier directory
-        mu_star : float
-            monthly temperature sensitivity (kg /m² /mth /K),
+        melt_f : float
+            melt temperature sensitivity factor per month (kg /m² /mth /K),
             need to be prescribed, e.g. such that
             |mean(MODEL_MB)-mean(REF_MB)|--> 0
-        bias : float, optional
-            default is to use zero bias [mm we yr-1]
-            you want to use (the default is to use zero bias)
-            Note that this bias is *substracted* from the computed MB. Indeed:
-            BIAS = MODEL_MB - REFERENCE_MB.
+        residual : float, optional
+            default is to use a residual of zero [mm we yr-1]
+            Note that this residual is *substracted* from the computed MB.
+            Indeed: residual = MODEL_MB - REFERENCE_MB.
+            ToDO: maybe change the sign?,
+            opposite to OGGM "MB terms + residual"
         mb_type: str
             three types: 'mb_daily' (default: use temp_std and N percentiles),
             'mb_monthly' (same as default OGGM mass balance),
             'mb_real_daily' (use daily temperature values).
+            OGGM "MB terms + residual"
             the mb_type only work if the baseline_climate of gdir is right
         N : int
             number of percentiles used to generate gaussian-like daily
@@ -487,8 +486,8 @@ class mb_modules(MassBalanceModel):
             consistency with `temp_bias`)
         """
 
-        self.mu_star = mu_star
-        self.bias = bias
+        self.melt_f = melt_f
+        self.residual = residual
 
         # Parameters (from cfg.PARAMS in OGGM default)
         self.t_solid = t_solid
@@ -661,6 +660,148 @@ class mb_modules(MassBalanceModel):
             self.ys = self.years[0] if ys is None else ys
             self.ye = self.years[-1] if ye is None else ye
 
+        # this does not work, will need to use it as a method instead ...
+        # if check_climate:
+        #    self.ref_hgt = historical_climate_qc_mod(self, gdir, fpath)
+        self.fpath = fpath
+
+    def historical_climate_qc_mod(self, gdir,
+                                  # t_solid=0, t_liq=2, t_melt=0, prcp_fac=2.5,
+                                  # default_grad=-0.0065,
+                                  # templocal_gradient_bounds=[-0.009, -0.003],
+                                  climate_qc_months=3,
+                                  use_cfg_params=False):
+        """"Check the "quality" of climate data and correct it if needed.
+
+        Similar to historical_climate_qc from oggm.core.climate but checks
+        that climate that is used in TIModels directly
+
+        This forces the climate data to have at least one month of melt
+        per year at the terminus of the glacier (i.e. simply shifting
+        temperatures up
+        when necessary), and at least one month where accumulation is possible
+        at the glacier top (i.e. shifting the temperatures down).
+
+        TODO: why ist here not the temp_bias inside???
+        """
+
+        # # Parameters
+        # if use_cfg_params:
+        #     temp_s = (cfg.PARAMS['temp_all_liq'] +
+        # cfg.PARAMS['temp_all_solid'])/2
+        #     temp_m = cfg.PARAMS['temp_melt']
+        #     default_grad = cfg.PARAMS['temp_default_gradient']
+        #     g_minmax = cfg.PARAMS['temp_local_gradient_bounds']
+        #     qc_months = cfg.PARAMS['climate_qc_months']
+        # else:
+        #     temp_s = (t_liq + t_solid) / 2
+        #     temp_m = t_melt
+        #     default_grad = default_grad
+        #     g_minmax = temp_local_gradient_bounds
+        # if qc_months == 0:
+        #     return
+
+        # Read file
+        # if cfg.PARAMS['baseline_climate'] == 'ERA5_daily':
+        #     filesuffix = '_daily'
+        # fpath = gdir.get_filepath('climate_historical'+filesuffix)
+        # igrad = None
+        # with utils.ncDataset(fpath) as nc:
+        #     # time
+        #     # Read timeseries
+        #     itemp = nc.variables['temp'][:]
+        #     if 'gradient' in nc.variables:
+        #         igrad = nc.variables['gradient'][:]
+        #         # Security for stuff that can happen with local gradients
+        #         igrad = np.where(~np.isfinite(igrad), default_grad, igrad)
+        #         igrad = utils.clip_array(igrad, g_minmax[0], g_minmax[1])
+        #     ref_hgt = nc.ref_hgt
+
+        # # Default gradient?
+        # if igrad is None:
+        #     igrad = itemp * 0 + default_grad
+
+        # Parameters (from cfg.PARAMS in OGGM defaul
+        fpath = self.fpath
+        grad = self.grad
+        ref_hgt = self.ref_hgt
+        itemp = self.temp
+        temp_m = self.t_melt
+        temp_s = (self.t_liq + self.t_solid) / 2
+        if cfg.PARAMS['baseline_climate'] == 'ERA5_daily':
+            # different amount of days per year ...
+            d_m = 30
+            pass
+        else:
+            d_m = 1
+            ny = len(grad) // 12
+            assert ny == len(grad) / 12
+
+        # Geometry data
+        fls = gdir.read_pickle('inversion_flowlines')
+        heights = np.array([])
+        for fl in fls:
+            heights = np.append(heights, fl.surface_h)
+        top_h = np.max(heights)
+        bot_h = np.min(heights)
+
+        # First check - there should be at least "climate_qc_months"
+        # month of melt every year
+        prev_ref_hgt = ref_hgt
+        while True:
+            # removed default_grad and uses instead grad!
+            ts_bot = itemp + grad * (bot_h - ref_hgt)
+            # reshape does not work , because of different amount of days
+            # per year ...
+            pd_ts = pd.DataFrame({'ts_threshold': ts_bot > temp_m,
+                                  'year': self.years})
+            ts_bot = pd_ts.groupby('year').sum()['ts_threshold'].values
+            # ts_bot = (ts_bot.reshape((ny, 12)) > temp_m).sum(axis=1)
+            if np.all(ts_bot >= climate_qc_months * d_m):
+                # Ok all good
+                break
+            # put ref hgt a bit higher so that we warm things a bit
+            ref_hgt += 10
+
+        # If we changed this it makes no sense to lower it down again,
+        # so resume here:
+        if ref_hgt != prev_ref_hgt:
+            with utils.ncDataset(fpath, 'a') as nc:
+                nc.ref_hgt = ref_hgt
+                nc.uncorrected_ref_hgt = prev_ref_hgt
+            gdir.add_to_diagnostics('ref_hgt_qc_diff',
+                                    int(ref_hgt - prev_ref_hgt))
+            # need to save the new ref_hgt
+            self.ref_hgt = ref_hgt
+            return
+
+        # Second check - there should be at least "climate_qc_months"
+        # month of acc every year
+        while True:
+            # grad instead of default_grad
+            ts_top = itemp + grad * (top_h - ref_hgt)
+            # reshape does not work , because of different amount of days
+            # per year ...
+            pd_ts = pd.DataFrame({'ts_threshold': ts_top < temp_s,
+                                  'year': self.years})
+            ts_top = pd_ts.groupby('year').sum()['ts_threshold'].values
+            # ts_top = (ts_top.reshape((ny, 12)) < temp_s).sum(axis=1)
+            if np.all(ts_top >= climate_qc_months * d_m):
+                # Ok all good
+                break
+            # put ref hgt a bit lower so that we cold things a bit
+            ref_hgt -= 10
+
+        if ref_hgt != prev_ref_hgt:
+            with utils.ncDataset(fpath, 'a') as nc:
+                nc.ref_hgt = ref_hgt
+                nc.uncorrected_ref_hgt = prev_ref_hgt
+            gdir.add_to_diagnostics('ref_hgt_qc_diff',
+                                    int(ref_hgt - prev_ref_hgt))
+            # need to save the new ref_hgt
+            self.ref_hgt = ref_hgt
+            return
+
     def _get_climate(self, heights, climate_type, year=None):
         """Climate information at given heights.
         year has to be given as float hydro year from what the month is taken,
@@ -822,8 +963,6 @@ class mb_modules(MassBalanceModel):
             else:
                 shape_tfm = np.shape(tempformelt_without_std)
                 tempformelt_with_std = np.full(shape_tfm, np.NaN)
-                z_std = np.matmul(np.atleast_2d(z_scores_mean).T,
-                                  np.atleast_2d(itemp_std))
                 for h in np.arange(0, np.shape(tempformelt_without_std)[0]):
                     h_tfm_daily_ = np.atleast_2d(tempformelt_without_std[h, :])
                     h_tempformelt_daily = h_tfm_daily_ + z_std
@@ -870,9 +1009,9 @@ class mb_modules(MassBalanceModel):
             _, temp2dformelt, _, prcpsol = out
             # 1 / (days per month)
             fact = 1/len(prcpsol.T)
-            # to have the same unit of mu_star, which is
+            # to have the same unit of melt_f, which is
             # the monthly temperature sensitivity (kg /m² /mth /K),
-            mb_daily = prcpsol - self.mu_star * temp2dformelt * fact
+            mb_daily = prcpsol - self.melt_f * temp2dformelt * fact
 
             mb_month = np.sum(mb_daily, axis=1)
             # more correct than using a mean value for days in a month
@@ -883,10 +1022,10 @@ class mb_modules(MassBalanceModel):
         else:
             # get 1D values for each height, no dependency on days
             _, tmelt, _, prcpsol = self.get_monthly_climate(heights, year=year)
-            mb_month = prcpsol - self.mu_star * tmelt
+            mb_month = prcpsol - self.melt_f * tmelt
 
-        # bias is in general, so SEC_IN_MONTH .. can be used
-        mb_month -= self.bias * self.SEC_IN_MONTH / self.SEC_IN_YEAR
+        # residual is in general, so SEC_IN_MONTH .. can be used
+        mb_month -= self.residual * self.SEC_IN_MONTH / self.SEC_IN_YEAR
         # this is for mb_daily otherwise it gives the wrong shape
         mb_month = mb_month.flatten()
         # instead of SEC_IN_MONTH, use instead len(prcpsol.T)==daysinmonth
@@ -899,15 +1038,15 @@ class mb_modules(MassBalanceModel):
 
         _, temp2dformelt, _, prcpsol = self._get_2d_annual_climate(heights,
                                                                    year)
-        # *12/daysofthisyear in order to have the same unit of mu_star, which
+        # *12/daysofthisyear in order to have the same unit of melt_f, which
         # is the monthly temperature sensitivity (kg /m² /mth /K),
         if self.mb_type == 'mb_real_daily':
             # in this case we have the temp2dformelt for each day
-            # but self.mu_star is in per month -> divide trough days/month
+            # but self.melt_f is in per month -> divide trough days/month
             # more correct than using a mean value for days in a year
             fact = 12/len(prcpsol.T)
         else:
             fact = 1
-        mb_annual = np.sum(prcpsol - self.mu_star * temp2dformelt*fact,
+        mb_annual = np.sum(prcpsol - self.melt_f * temp2dformelt*fact,
                            axis=1)
-        return (mb_annual - self.bias) / self.SEC_IN_YEAR / self.rho
+        return (mb_annual - self.residual) / self.SEC_IN_YEAR / self.rho

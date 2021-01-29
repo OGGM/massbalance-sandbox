@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # imports from local MBsandbox package modules
-from MBsandbox.mbmod_daily_oneflowline import mb_modules
+from MBsandbox.mbmod_daily_oneflowline import TIModel
 
 
 # %%
@@ -22,7 +22,8 @@ def minimize_bias(x, mb_type='mb_daily', grad='cte', gdir_min=None,
                   pf=2.5, loop=False, absolute_bias=False):
     """ calibrates the degree day factor or mu_star by getting the bias to zero
 
-
+    TODO: import also gdir, only change DDF,
+    and not instantiate the model always again
 
     Parameters
     ----------
@@ -59,8 +60,11 @@ def minimize_bias(x, mb_type='mb_daily', grad='cte', gdir_min=None,
     h, w = gdir_min.get_inversion_flowline_hw()
     mbdf = gdir_min.get_ref_mb_data()
     mu_star = x
-    mbmod_s = mb_modules(gdir_min, mu_star, mb_type=mb_type, grad_type=grad,
-                         N=N, prcp_fac=pf, loop=loop)
+    mbmod_s = TIModel(gdir_min, mu_star, mb_type=mb_type, grad_type=grad,
+                      N=N, prcp_fac=pf, loop=loop)
+
+    # check climate and adapt if necessary
+    mbmod_s.historical_climate_qc_mod(gdir_min)
     mb_specific = mbmod_s.get_specific_mb(heights=h,
                                           widths=w,
                                           year=mbdf.index.values)
@@ -148,6 +152,7 @@ def optimize_std_quot_brentq(x, mb_type='mb_daily', grad='cte',
     between modelled and reference mass balance) is computed,
     which is then minimised
 
+    TODO: only change DDF, and not instantiate the model always again
 
     Parameters
     ----------
@@ -179,8 +184,10 @@ def optimize_std_quot_brentq(x, mb_type='mb_daily', grad='cte',
                                     xtol=0.01, args=(mb_type, grad, gdir_min,
                                                      N, pf, loop, False),
                                     disp=True)
-    mbmod_s = mb_modules(gdir_min, DDF_opt, mb_type=mb_type, prcp_fac=pf,
-                         grad_type=grad, N=N)
+    mbmod_s = TIModel(gdir_min, DDF_opt, mb_type=mb_type, prcp_fac=pf,
+                      grad_type=grad, N=N)
+    # check climate and adapt if necessary
+    mbmod_s.historical_climate_qc_mod(gdir_min)
 
     mod_std = mbmod_s.get_specific_mb(heights=h, widths=w,
                                       year=mbdf.index.values).std()
