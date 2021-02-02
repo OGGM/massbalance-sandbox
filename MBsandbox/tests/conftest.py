@@ -16,7 +16,7 @@ def gdir():
     """
 
     cfg.initialize()
-
+    cfg.PARAMS['use_multiprocessing'] = False
     test_dir = '/home/lilianschuster/Schreibtisch/PhD/oggm_files/MBsandbox_tests'
     if not os.path.exists(test_dir):
         test_dir = utils.gettempdir(dirname='OGGM_MBsandbox_test',
@@ -32,3 +32,4 @@ def gdir():
                                               prepro_base_url=base_url,
                                               prepro_rgi_version='62')
     return gdirs[0]
+
