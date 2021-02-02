@@ -78,6 +78,7 @@ class Test_geodetic_hydro1:
 
 
 # %%
+# start it again to have the default hydro_month
 class Test_directobs_hydro10:
     def test_minimize_bias(self, gdir):
 
@@ -376,8 +377,6 @@ class Test_directobs_hydro10:
         # option (no loop) is 30% slower, it raises an error
 
         # this could be optimised and included in the above tests
-        cfg.initialize()
-
         climate = 'ERA5dr'
         mb_type = 'mb_daily'
         cfg.PARAMS['baseline_climate'] = 'ERA5dr'
