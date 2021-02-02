@@ -47,6 +47,7 @@ mu_star_opt_var = {'mb_monthly': 195.322804,
 pf = 2.5
 
 
+# %%
 class Test_geodetic_hydro1:
     # classes have to be upper case in order that they
     def test_hydro_years_HEF(self, gdir):
@@ -492,6 +493,33 @@ class Test_directobs_hydro10:
 
                     assert np.abs(utils.md(tot_mbN[N],
                                            mbdf['ANNUAL_BALANCE'])) < 10
+
+    def test_prcp_fac_update(self, gdir):
+
+        cfg.PARAMS['baseline_climate'] = 'ERA5dr'
+        oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset='ERA5dr')
+        gd_mb = TIModel(gdir, None, mb_type='mb_monthly', N=100, prcp_fac=2.5,
+                        grad_type='cte')
+        assert gd_mb.prcp_fac == 2.5
+        assert gd_mb.inst_prcp_fac == 2.5
+        prcp_old = gd_mb.prcp  # .mean()
+        gd_mb.prcp_fac = 10
+        assert gd_mb.prcp_fac == 10
+        assert gd_mb.inst_prcp_fac == 10
+        prcp_old_regen = 2.5 * gd_mb.prcp / gd_mb.prcp_fac
+        assert_allclose(prcp_old_regen, prcp_old)
+
+        # print(gd_mb._prcp_fac)
+        # print(gd_mb.prcp[0])
+        gd_mb.prcp_fac = 2.5
+        assert gd_mb.prcp_fac == 2.5
+        assert gd_mb.inst_prcp_fac == 2.5
+        assert_allclose(gd_mb.prcp, prcp_old)
+        with pytest.raises(InvalidParamsError):
+            gd_mb.prcp_fac = 0
+        with pytest.raises(InvalidParamsError):
+            TIModel(gdir, None, mb_type='mb_monthly', N=100, prcp_fac=-1,
+                    grad_type='cte')
 
     def test_historical_climate_qc_mon(self, gdir):
 

@@ -22,7 +22,7 @@ def minimize_bias(x, mb_type='mb_daily', grad='cte', gdir_min=None,
                   pf=2.5, loop=False, absolute_bias=False):
     """ calibrates the degree day factor or mu_star by getting the bias to zero
 
-    TODO: import also gdir, only change DDF,
+    TODO: import also TIModel instance, only change melt_f,
     and not instantiate the model always again
 
     Parameters
@@ -79,7 +79,7 @@ def minimize_bias(x, mb_type='mb_daily', grad='cte', gdir_min=None,
 
 
 def compute_stat(mb_specific=None, mbdf=None, return_dict=False,
-                 return_plot=False):
+                 return_plot=False, round = False):
     """ function that computes RMSD, bias, rcor, quot_std between modelled
     and reference mass balance
 
@@ -133,7 +133,11 @@ def compute_stat(mb_specific=None, mbdf=None, return_dict=False,
                                                   bias.round(2)))
         label = return_plot + stat_l
         plt.plot(mbdf.index, mb_specific, label=label)
-
+    if round:
+        RMSD = RMSD.round(1)
+        bias = bias.round(1)
+        rcor = rcor.round(3)
+        quot_std = quot_std.round(3)
     if return_dict:
         return {'RMSD': RMSD, 'bias': bias,
                 'rcor': rcor, 'quot_std': quot_std}
@@ -152,7 +156,7 @@ def optimize_std_quot_brentq(x, mb_type='mb_daily', grad='cte',
     between modelled and reference mass balance) is computed,
     which is then minimised
 
-    TODO: only change DDF, and not instantiate the model always again
+    TODO: only change melt_f and pf, and not instantiate the model always again
 
     Parameters
     ----------

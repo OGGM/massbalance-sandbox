@@ -7,7 +7,13 @@ Created on Thu Dec 24 12:28:37 2020
 
 different temperature index mass balance types added that are working with the Huss flowlines
 """
+# jax_true = True
+# if jax_true:
+#     import jax.numpy as np
+#     import numpy as onp
+# else: problem: nan values, where stuff ...
 import numpy as np
+
 import pandas as pd
 import xarray as xr
 import os
@@ -485,8 +491,20 @@ class TIModel(MassBalanceModel):
             Precipitation factor to the time series (called bias for
             consistency with `temp_bias`)
         """
-
+        # melt_f is only initiated here, and not used in __init__.py
+        # so it does not matter if it is changed
         self.melt_f = melt_f
+        if self.melt_f != None and self.melt_f <= 0:
+            raise InvalidParamsError('melt_f has to be above zero!')
+        # but there is a problem with prcp_fac,
+        # as self.prcp is produced by changing prcp_fac
+        # so there is no self.prcp_fac here
+        # and we need to update the prcp via prcp_fac by a property
+        # self.prcp_fac = prcp_fac
+        if prcp_fac <= 0:
+            raise InvalidParamsError('prcp_fac has to be above zero!')
+        self.inst_prcp_fac = prcp_fac
+        self._prcp_fac = prcp_fac # private attribute
         self.residual = residual
 
         # Parameters (from cfg.PARAMS in OGGM default)
@@ -598,7 +616,9 @@ class TIModel(MassBalanceModel):
                 self.months = pd_test['hydro_month'].values
             # Read timeseries
             self.temp = xr_nc['temp'].values
-            self.prcp = xr_nc['prcp'].values * prcp_fac
+            # this is prcp computed by instantiation
+            # this changes if prcp_fac is updated (see @property)
+            self.prcp = xr_nc['prcp'].values * self.inst_prcp_fac
 
             # lapse rate (temperature gradient)
             if self.grad_type == 'var' or self.grad_type == 'var_an_cycle':
@@ -664,6 +684,37 @@ class TIModel(MassBalanceModel):
         # if check_climate:
         #    self.ref_hgt = historical_climate_qc_mod(self, gdir, fpath)
         self.fpath = fpath
+
+    # copying Cat class idea ;-)
+    # https://fabienmaussion.info/scientific_programming/week_10/01-OOP-Part-1.html
+    @property
+    def prcp_fac(self):
+        ''' prints the _prcp_fac
+        '''
+        return self._prcp_fac
+
+    #def _recompute_prcp(self, new_prcp_fac):
+
+
+
+    @prcp_fac.setter
+    def prcp_fac(self, new_prcp_fac):
+        '''
+        '''
+        if new_prcp_fac <= 0:
+            raise InvalidParamsError('prcp_fac has to be above zero!')
+        # attention, prcp_fac should not be called here
+        # otherwise there is recursion occurring forever...
+        self._prcp_fac = new_prcp_fac
+        # use new_prcp_fac to not get maximum recusion depth error
+        # self._recompute_prcp(new_prcp_fac)
+        self.prcp = self.prcp * new_prcp_fac / self.inst_prcp_fac
+
+        # prcp = self.prcp * self.prcp_fac / self._prcp_fac
+        # update old prcp_fac in order that it can be updated
+        # again ...
+        self.inst_prcp_fac = new_prcp_fac
+
 
     def historical_climate_qc_mod(self, gdir,
                                   # t_solid=0, t_liq=2, t_melt=0, prcp_fac=2.5,
