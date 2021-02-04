@@ -500,11 +500,10 @@ class TIModel(MassBalanceModel):
         # as self.prcp is produced by changing prcp_fac
         # so there is no self.prcp_fac here
         # and we need to update the prcp via prcp_fac by a property
-        # self.prcp_fac = prcp_fac
         if prcp_fac <= 0:
             raise InvalidParamsError('prcp_fac has to be above zero!')
-        self.inst_prcp_fac = prcp_fac
-        self._prcp_fac = prcp_fac # private attribute
+        # private attribute
+        self._prcp_fac = prcp_fac
         self.residual = residual
 
         # Parameters (from cfg.PARAMS in OGGM default)
@@ -618,7 +617,7 @@ class TIModel(MassBalanceModel):
             self.temp = xr_nc['temp'].values
             # this is prcp computed by instantiation
             # this changes if prcp_fac is updated (see @property)
-            self.prcp = xr_nc['prcp'].values * self.inst_prcp_fac
+            self.prcp = xr_nc['prcp'].values * self._prcp_fac
 
             # lapse rate (temperature gradient)
             if self.grad_type == 'var' or self.grad_type == 'var_an_cycle':
@@ -676,13 +675,19 @@ class TIModel(MassBalanceModel):
                 raise InvalidParamsError('grad_type can be either cte,'
                                          'var or var_an_cycle')
             self.grad = grad
-            self.ref_hgt = xr_nc.ref_hgt
+            self.ref_hgt = xr_nc.ref_hgt  # xr_nc.uncorrected_ref_hgt
+            # ref_hgt
+            # if climate dataset has been corrected once again
+            # or non corrected reference height!
+            try:
+                self.uncorrected_ref_hgt = xr_nc.uncorrected_ref_hgt
+            except:
+                self.uncorrected_ref_hgt = xr_nc.ref_hgt
+            # xr_nc.ref_hgt
+
             self.ys = self.years[0] if ys is None else ys
             self.ye = self.years[-1] if ye is None else ye
 
-        # this does not work, will need to use it as a method instead ...
-        # if check_climate:
-        #    self.ref_hgt = historical_climate_qc_mod(self, gdir, fpath)
         self.fpath = fpath
 
     # copying Cat class idea ;-)
@@ -705,15 +710,12 @@ class TIModel(MassBalanceModel):
             raise InvalidParamsError('prcp_fac has to be above zero!')
         # attention, prcp_fac should not be called here
         # otherwise there is recursion occurring forever...
-        self._prcp_fac = new_prcp_fac
         # use new_prcp_fac to not get maximum recusion depth error
-        # self._recompute_prcp(new_prcp_fac)
-        self.prcp = self.prcp * new_prcp_fac / self.inst_prcp_fac
+        self.prcp = self.prcp * new_prcp_fac / self._prcp_fac
 
-        # prcp = self.prcp * self.prcp_fac / self._prcp_fac
         # update old prcp_fac in order that it can be updated
         # again ...
-        self.inst_prcp_fac = new_prcp_fac
+        self._prcp_fac = new_prcp_fac
 
 
     def historical_climate_qc_mod(self, gdir,
@@ -775,7 +777,8 @@ class TIModel(MassBalanceModel):
         # Parameters (from cfg.PARAMS in OGGM defaul
         fpath = self.fpath
         grad = self.grad
-        ref_hgt = self.ref_hgt
+        # get non-corrected quality check
+        ref_hgt = self.uncorrected_ref_hgt
         itemp = self.temp
         temp_m = self.t_melt
         temp_s = (self.t_liq + self.t_solid) / 2

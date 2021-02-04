@@ -376,7 +376,7 @@ class Test_directobs_hydro10:
         # option (no loop) is 30% slower, it raises an error
 
         # this could be optimised and included in the above tests
-        cfg.initialize()
+        # cfg.initialize()
 
         climate = 'ERA5dr'
         mb_type = 'mb_daily'
@@ -501,11 +501,11 @@ class Test_directobs_hydro10:
         gd_mb = TIModel(gdir, None, mb_type='mb_monthly', N=100, prcp_fac=2.5,
                         grad_type='cte')
         assert gd_mb.prcp_fac == 2.5
-        assert gd_mb.inst_prcp_fac == 2.5
+        assert gd_mb._prcp_fac == 2.5
         prcp_old = gd_mb.prcp  # .mean()
         gd_mb.prcp_fac = 10
         assert gd_mb.prcp_fac == 10
-        assert gd_mb.inst_prcp_fac == 10
+        assert gd_mb._prcp_fac == 10
         prcp_old_regen = 2.5 * gd_mb.prcp / gd_mb.prcp_fac
         assert_allclose(prcp_old_regen, prcp_old)
 
@@ -513,7 +513,7 @@ class Test_directobs_hydro10:
         # print(gd_mb.prcp[0])
         gd_mb.prcp_fac = 2.5
         assert gd_mb.prcp_fac == 2.5
-        assert gd_mb.inst_prcp_fac == 2.5
+        assert gd_mb._prcp_fac == 2.5
         assert_allclose(gd_mb.prcp, prcp_old)
         with pytest.raises(InvalidParamsError):
             gd_mb.prcp_fac = 0
@@ -547,9 +547,12 @@ class Test_directobs_hydro10:
                              t_solid=0, t_liq=2, t_melt=0,
                              default_grad=-0.0065,
                              grad_type=grad_type)
+                ref_hgt_0 = mb.uncorrected_ref_hgt
                 mb.historical_climate_qc_mod(gdir)
+                ref_uncorrected = mb.uncorrected_ref_hgt
                 mbdf = gdir.get_ref_mb_data()
-
+                ref_hgt_1 = mb.ref_hgt
+                assert (ref_hgt_1 - ref_hgt_0) < -4000
                 with utils.ncDataset(fc, 'r') as nc:
                     assert (nc.ref_hgt - nc.uncorrected_ref_hgt) < -4000
 
@@ -566,14 +569,19 @@ class Test_directobs_hydro10:
                 # Lower ref hgt a lot
                 with utils.ncDataset(fc, 'a') as nc:
                     nc.ref_hgt = 0
+                    # as we change here the ref_hgt manually,
+                    # we also have to reset the uncorrected ref hgt
+                    nc.uncorrected_ref_hgt = 0
                 mb = TIModel(gdir, 200,
                              mb_type=mb_type,
                              prcp_fac=pf, N=100,
                              t_solid=0, t_liq=2, t_melt=0,
                              default_grad=-0.0065,
                              grad_type=grad_type)
+                ref_hgt_0 = mb.uncorrected_ref_hgt
                 mb.historical_climate_qc_mod(gdir)
-
+                ref_hgt_1 = mb.ref_hgt
+                assert (ref_hgt_1 - ref_hgt_0) > 1800
                 with utils.ncDataset(fc, 'r') as nc:
                     assert (nc.ref_hgt - nc.uncorrected_ref_hgt) > 1800
 
