@@ -26,6 +26,7 @@ from oggm.core import massbalance
 from oggm import utils, workflow, tasks, cfg
 from oggm.cfg import SEC_IN_DAY, SEC_IN_YEAR
 from oggm.exceptions import InvalidParamsError
+from oggm.utils import date_to_floatyear
 
 
 # imports from MBsandbox package modules
@@ -33,6 +34,7 @@ from MBsandbox.help_func import (compute_stat, minimize_bias,
                                  optimize_std_quot_brentq)
 
 from MBsandbox.mbmod_daily_oneflowline import (process_era5_daily_data,
+                                               process_wfde5_data,
                                                TIModel)
 
 # optimal values for HEF of mu_star for cte lapse rates
@@ -96,17 +98,19 @@ class Test_directobs_hydro10:
                 cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
                 process_era5_daily_data(gdir)
 
-            DDF_opt = scipy.optimize.brentq(minimize_bias, 1, 10000, disp=True,
-                                            xtol=0.1,
-                                            args=(mb_type, grad_type, gdir, N,
-                                                  pf, loop, False))
+            gd_mb = TIModel(gdir, None, mb_type=mb_type, N=N,
+                            grad_type=grad_type)
+            melt_f_opt = scipy.optimize.brentq(minimize_bias, 1, 10000,
+                                               disp=True, xtol=0.1,
+                                                args=(gd_mb, gdir,
+                                                  pf, False))
+
             hgts, widths = gdir.get_inversion_flowline_hw()
             mbdf = gdir.get_ref_mb_data()
             # check if they give the same optimal DDF
-            assert np.round(mu_star_opt_cte[mb_type]/DDF_opt, 3) == 1
+            assert np.round(mu_star_opt_cte[mb_type]/melt_f_opt, 3) == 1
 
-            gd_mb = TIModel(gdir, DDF_opt, mb_type=mb_type, N=N,
-                            grad_type=grad_type)
+            gd_mb.melt_f = melt_f_opt
             gd_mb.historical_climate_qc_mod(gdir)
 
             mb_specific = gd_mb.get_specific_mb(heights=hgts, widths=widths,
@@ -120,7 +124,7 @@ class Test_directobs_hydro10:
     # %%
 
 
-    def test_optimize_std_quot_brentq(self, gdir):
+    def test_optimize_std_quot_brentq_ERA5dr(self, gdir):
         # check if double optimisation of bias and std_quotient works
 
         grad_type = 'cte'
@@ -136,18 +140,64 @@ class Test_directobs_hydro10:
 
             hgts, widths = gdir.get_inversion_flowline_hw()
             mbdf = gdir.get_ref_mb_data()
+            gd_mb = TIModel(gdir, None, prcp_fac=1,
+                            mb_type=mb_type,
+                            grad_type=grad_type, N=N)
             pf_opt = scipy.optimize.brentq(optimize_std_quot_brentq, 0.01, 20,
-                                           args=(mb_type, grad_type, gdir,
-                                                 N, loop),
+                                           args=(gd_mb, gdir),
                                            xtol=0.01)
 
-            DDF_opt_pf = scipy.optimize.brentq(minimize_bias, 1, 10000,
-                                               args=(mb_type, grad_type,
-                                                     gdir, N, pf_opt,
-                                                     loop, False),
-                                               disp=True, xtol=0.1)
-            gd_mb = TIModel(gdir, DDF_opt_pf, prcp_fac=pf_opt, mb_type=mb_type,
+            melt_f_opt_pf = scipy.optimize.brentq(minimize_bias, 1, 10000,
+                                               disp=True, xtol=0.1,
+                                               args=(gd_mb, gdir,
+                                                     pf_opt, False))
+            gd_mb.melt_f = melt_f_opt_pf
+            gd_mb.prcp_fac = pf_opt
+            gd_mb.historical_climate_qc_mod(gdir)
+            mb_specific = gd_mb.get_specific_mb(heights=hgts, widths=widths,
+                                                year=mbdf.index.values)
+
+            RMSD, bias, rcor, quot_std = compute_stat(mb_specific=mb_specific,
+                                                      mbdf=mbdf)
+
+            # check if the bias is optimised
+            assert bias.round() == 0
+            # check if the std_quotient is optimised
+            assert quot_std.round(1) == 1
+
+    def test_optimize_std_quot_brentq_WFDE5(self, gdir):
+        # check if double optimisation of bias and std_quotient works
+        # TODO adapt this to WFDE5!!!
+        grad_type = 'cte'
+        N = 100
+        loop = False
+        for mb_type in ['mb_monthly', 'mb_daily', 'mb_real_daily']:
+            if mb_type != 'mb_real_daily':
+                cfg.PARAMS['baseline_climate'] = 'WFDE5'
+                process_wfde5_data(gdir, temporal_resol='monthly')
+
+            else:
+                # because of get_climate_info need ERA5_daily as
+                # baseline_climate until WFDE5_daily is included in
+                # get_climate_info
+                cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
+                process_wfde5_data(gdir, temporal_resol='daily')
+
+            hgts, widths = gdir.get_inversion_flowline_hw()
+            mbdf = gdir.get_ref_mb_data()
+            gd_mb = TIModel(gdir, None, prcp_fac=1,
+                            mb_type=mb_type,
                             grad_type=grad_type, N=N)
+            pf_opt = scipy.optimize.brentq(optimize_std_quot_brentq, 0.01, 20,
+                                           args=(gd_mb, gdir),
+                                           xtol=0.01)
+
+            melt_f_opt_pf = scipy.optimize.brentq(minimize_bias, 1, 10000,
+                                               disp=True, xtol=0.1,
+                                               args=(gd_mb, gdir,
+                                                     pf_opt, False))
+            gd_mb.melt_f = melt_f_opt_pf
+            gd_mb.prcp_fac = pf_opt
             gd_mb.historical_climate_qc_mod(gdir)
             mb_specific = gd_mb.get_specific_mb(heights=hgts, widths=widths,
                                                 year=mbdf.index.values)
@@ -246,11 +296,11 @@ class Test_directobs_hydro10:
 
                     if fail_err_1 or fail_err_2 or fail_err_3 or fail_err_4:
                         with pytest.raises(InvalidParamsError):
-                            mb_mod = TIModel(gdir, mu_star_opt[mb_type],
-                                             mb_type=mb_type, prcp_fac=pf,
-                                             t_solid=0, t_liq=2, t_melt=0,
-                                             default_grad=-0.0065,
-                                             grad_type=grad_type)
+                            TIModel(gdir, mu_star_opt[mb_type],
+                                     mb_type=mb_type, prcp_fac=pf,
+                                     t_solid=0, t_liq=2, t_melt=0,
+                                     default_grad=-0.0065,
+                                     grad_type=grad_type)
                     else:
                         # this is just a test for reproducibility!
                         mb_mod = TIModel(gdir, mu_star_opt[mb_type],
@@ -296,9 +346,7 @@ class Test_directobs_hydro10:
                         # 0.15 does not work
 
     def test_monthly_glacier_massbalance(self, gdir):
-        # TODO: problem with that, monthly and annual MB not exactly same!!!
         # I think there is a problem with SEC_IN_MONTH/SEC_IN_YEAR ...
-
         # do this for all model types
         # ONLY TEST it for ERA5dr or ERA5_daily!!!
         N = 100
@@ -332,11 +380,11 @@ class Test_directobs_hydro10:
 
                     if fail_err_1 or fail_err_2 or fail_err_3 or fail_err_4:
                         with pytest.raises(InvalidParamsError):
-                            mb_mod = TIModel(gdir, mu_star_opt[mb_type],
-                                             mb_type=mb_type, prcp_fac=pf,
-                                             t_solid=0, t_liq=2, t_melt=0,
-                                             default_grad=-0.0065,
-                                             grad_type=grad_type)
+                            TIModel(gdir, mu_star_opt[mb_type],
+                                     mb_type=mb_type, prcp_fac=pf,
+                                     t_solid=0, t_liq=2, t_melt=0,
+                                     default_grad=-0.0065,
+                                     grad_type=grad_type)
                     else:
                         # but this is just a test for reproducibility!
                         mb_mod = TIModel(gdir, mu_star_opt[mb_type],
@@ -363,12 +411,97 @@ class Test_directobs_hydro10:
                             my_an_mb_on_h = (mb_mod.get_annual_mb(hgts, yr) *
                                              dayofyear * SEC_IN_DAY * rho)
 
-                            # these large errors might come from problematic of
-                            # different amount of days in a year?
-                            # or maybe it just does not fit ...
+                            # these errors come from the problematic of
+                            # different amount of days in a year
                             assert_allclose(np.mean(my_an_mb_on_h -
                                                     my_mon_mb_on_h),
-                                            0, atol=100)
+                                            0, atol=10)
+
+    def test_daily_monthly_annual_specific_mb(self, gdir):
+        # for both ERA5 and WFDE5
+        h, w = gdir.get_inversion_flowline_hw()
+
+        grad_type = 'cte'
+        for dataset in ['ERA5', 'WFDE5']:
+            if dataset == 'ERA5':
+                pf = 2.5
+            elif dataset == 'WFDE5':
+                pf = 1
+            for mb_type in ['mb_monthly', 'mb_real_daily']:
+                if mb_type == 'mb_real_daily' and dataset == 'ERA5':
+                    cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
+                    process_era5_daily_data(gdir)
+                elif mb_type == 'mb_real_daily' and dataset == 'WFDE5':
+                    # TODO: WFDE5_daily_cru
+                    cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
+                    process_wfde5_data(gdir, temporal_resol='daily')
+                elif mb_type == 'mb_monthly' and dataset == 'ERA5':
+                    cfg.PARAMS['baseline_climate'] = 'ERA5dr'
+                    oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset='ERA5dr')
+                elif mb_type == 'mb_monthly' and dataset == 'WFDE5':
+                    cfg.PARAMS['baseline_climate'] = 'WFDE5_monthly_cru'
+                    process_wfde5_data(gdir, temporal_resol='monthly')
+                gd_mb = TIModel(gdir, 200, mb_type=mb_type, grad_type=grad_type,
+                                prcp_fac=pf)
+
+                spec_mb_annually = gd_mb.get_specific_mb(heights=h, widths=w,
+                                                         year=np.arange(1980,
+                                                                        2019))
+                if mb_type == 'mb_real_daily':
+                    # check if daily and yearly specific mb are the same?
+                    spec_mb_daily = gd_mb.get_specific_daily_mb(heights=h,
+                                                                widths=w,
+                                                                year=np.arange(
+                                                                    1980, 2019))
+                    spec_mb_daily_yearly_sum = []
+                    for mb in spec_mb_daily:
+                        spec_mb_daily_yearly_sum.append(mb.sum())
+                    np.testing.assert_allclose(spec_mb_daily_yearly_sum,
+                                               spec_mb_annually, rtol=1e-4)
+
+                # check if annual and monthly mass balance are the same
+                ann_mb = gd_mb.get_annual_mb(heights=h, year=2015)
+                mon_mb_sum = 0
+                for m in np.arange(1, 13):
+                    mon_mb_sum += gd_mb.get_monthly_mb(heights=h,
+                                                       year=date_to_floatyear(
+                                                           2015, m))
+                np.testing.assert_allclose(mon_mb_sum / 12, ann_mb, rtol=1e-4)
+
+                if mb_type == 'mb_real_daily':
+                    # check if daily and annual mass balance are the same
+                    day_mb = gd_mb.get_daily_mb(heights=h, year=2015)
+                    day_mb_yearly_sum = []
+                    for mb in day_mb:
+                        day_mb_yearly_sum.append(mb.mean())
+                    np.testing.assert_allclose(day_mb_yearly_sum, ann_mb,
+                                               rtol=1e-4)
+
+                if mb_type == 'mb_real_daily':
+                    # test if the climate output of monthly
+                    # and daily/annual is the same
+                    # by just looking at the first month
+                    clim_ann = gd_mb._get_2d_annual_climate(h, 2015)
+                    clim_mon = gd_mb._get_2d_monthly_climate(h, 2015.0)
+                    T_mon_from_ann = clim_ann[0][:, :np.shape(clim_mon[0])[1]]
+                    np.testing.assert_allclose(T_mon_from_ann, clim_mon[0],
+                                               rtol=1e-6)
+                    Tfmelt_mon_from_ann = clim_ann[1][:,
+                                          :np.shape(clim_mon[1])[1]]
+                    np.testing.assert_allclose(Tfmelt_mon_from_ann,
+                                               clim_mon[1], rtol=1e-6)
+                    prcp_mon_from_ann = clim_ann[2][:,
+                                        :np.shape(clim_mon[2])[1]]
+                    np.testing.assert_allclose(prcp_mon_from_ann,
+                                               clim_mon[2], rtol=1e-6)
+                    prcp_mon_from_ann = clim_ann[2][:,
+                                        :np.shape(clim_mon[2])[1]]
+                    np.testing.assert_allclose(prcp_mon_from_ann,
+                                               clim_mon[2], rtol=1e-6)
+                    solidprcp_mon_from_ann = clim_ann[3][:,
+                                             :np.shape(clim_mon[3])[1]]
+                    np.testing.assert_allclose(solidprcp_mon_from_ann,
+                                               clim_mon[3], rtol=1e-6)
 
     def test_loop(self, gdir):
         # tests whether ERA5dr works better with or without loop in mb_daily
@@ -380,8 +513,8 @@ class Test_directobs_hydro10:
 
         climate = 'ERA5dr'
         mb_type = 'mb_daily'
-        cfg.PARAMS['baseline_climate'] = 'ERA5dr'
-        oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset="ERA5dr")
+        cfg.PARAMS['baseline_climate'] = climate
+        oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset=climate)
 
         for grad_type in ['cte', 'var_an_cycle']:
             if grad_type == 'var_an_cycle':
@@ -556,12 +689,13 @@ class Test_directobs_hydro10:
                 with utils.ncDataset(fc, 'r') as nc:
                     assert (nc.ref_hgt - nc.uncorrected_ref_hgt) < -4000
 
-                DDF_opt = scipy.optimize.brentq(minimize_bias, 10, 10000,
-                                                disp=True, xtol=0.1,
-                                                args=(mb_type, grad_type,
-                                                      gdir, N,
-                                                      pf, loop, False))
-                mb.melt_f = DDF_opt
+
+                melt_f_opt = scipy.optimize.brentq(minimize_bias, 1, 10000,
+                                                   disp=True, xtol=0.1,
+                                                   args=(mb, gdir,
+                                                         pf, False))
+
+                mb.melt_f = melt_f_opt
                 mbdf['CALIB_1'] = mb.get_specific_mb(heights=h,
                                                      widths=w,
                                                      year=mbdf.index.values)
@@ -585,12 +719,11 @@ class Test_directobs_hydro10:
                 with utils.ncDataset(fc, 'r') as nc:
                     assert (nc.ref_hgt - nc.uncorrected_ref_hgt) > 1800
 
-                DDF_opt = scipy.optimize.brentq(minimize_bias, 10,
-                                                10000, disp=True, xtol=0.1,
-                                                args=(mb_type, grad_type,
-                                                      gdir, N, pf,
-                                                      loop, False))
-                mb.melt_f = DDF_opt
+                melt_f_opt = scipy.optimize.brentq(minimize_bias, 1, 10000,
+                                                   disp=True, xtol=0.1,
+                                                   args=(mb, gdir,
+                                                         pf, False))
+                mb.melt_f = melt_f_opt
                 mbdf['CALIB_2'] = mb.get_specific_mb(heights=h,
                                                      widths=w,
                                                      year=mbdf.index.values)
