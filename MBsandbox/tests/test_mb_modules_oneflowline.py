@@ -80,6 +80,7 @@ class Test_geodetic_hydro1:
 
 
 # %%
+# start it again to have the default hydro_month
 class Test_directobs_hydro10:
     def test_minimize_bias(self, gdir):
 
