@@ -27,8 +27,8 @@ import logging
 # imports from oggm
 from oggm import entity_task
 from oggm import cfg, utils
-from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH
-from oggm.utils import (floatyear_to_date, ncDataset,
+from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH, SEC_IN_DAY
+from oggm.utils import (floatyear_to_date, date_to_floatyear, ncDataset,
                         clip_min, clip_array)
 from oggm.utils._funcs import haversine
 from oggm.exceptions import InvalidParamsError
@@ -39,6 +39,8 @@ from oggm.core.massbalance import MassBalanceModel
 log = logging.getLogger(__name__)
 
 ECMWF_SERVER = 'https://cluster.klima.uni-bremen.de/~oggm/climate/'
+# ECMWF_SERVER1 = 'https://cluster.klima.uni-bremen.de/~lschuster/'
+
 
 
 # %%
@@ -50,6 +52,12 @@ BASENAMES['ERA5_daily'] = {
         # only glacier-relevant gridpoints included!
         }
 
+BASENAMES['WFDE5_daily_cru'] = {
+    'inv': 'wfde5_cru/daily/v1.1/wfde5_cru_glacier_invariant_flat.nc',
+    'tmp': 'wfde5_cru/daily/v1.1/wfde5_cru_tmp_1979-2018_flat.nc',
+    'prcp': 'wfde5_cru/daily/v1.1/wfde5_cru_prcp_1979-2018_flat.nc',
+    }
+
 
 # this could be used in general
 def write_climate_file(gdir, time, prcp, temp,
@@ -57,7 +65,8 @@ def write_climate_file(gdir, time, prcp, temp,
                        gradient=None, temp_std=None,
                        time_unit=None, calendar=None,
                        source=None, file_name='climate_historical',
-                       filesuffix=''):
+                       filesuffix='',
+                       temporal_resol='monthly'):
     """Creates a netCDF4 file with climate data timeseries.
 
     Parameters
@@ -67,7 +76,7 @@ def write_climate_file(gdir, time, prcp, temp,
     time : ndarray
         the time array, in a format understood by netCDF4
     prcp : ndarray
-        the precipitation array (unit: 'kg m-2 month-1')
+        the precipitation array (unit: 'kg m-2')
     temp : ndarray
         the temperature array (unit: 'degC')
     ref_pix_hgt : float
@@ -94,12 +103,21 @@ def write_climate_file(gdir, time, prcp, temp,
         How to name the file
     filesuffix : str
         Apply a suffix to the file
+    temporal_resol : str
+        temporal resolution of climate file, either monthly (default) or
+        daily
     """
 
     if source == 'ERA5_daily' and filesuffix == '':
-        raise InvalidParamsError('filesuffix should be "_daily" as only \
-                                 file_name climate_historical is normally \
-                                     monthly data')
+        raise InvalidParamsError("filesuffix should be '_daily' for ERA5_daily"
+                                 "file_name climate_historical is normally"
+                                 "monthly data")
+    elif (source == 'WFDE5_daily_cru' and filesuffix == ''
+          and temporal_resol == 'daily'):
+        raise InvalidParamsError("filesuffix should be '_daily' for WFDE5_daily_cru"
+                                 "if daily chosen as temporal_resol"
+                                 "file_name climate_historical is normally"
+                                 "monthly data")
     # overwrite is default
     fpath = gdir.get_filepath(file_name, filesuffix=filesuffix)
     if os.path.exists(fpath):
@@ -169,27 +187,40 @@ def write_climate_file(gdir, time, prcp, temp,
         v.units = 'kg m-2'
         # this could be made more beautriful
         # just rough estimate
-        if len(prcp) > (nc.hydro_yr_1 - nc.hydro_yr_0 + 1) * 30 * 12:
-            v.long_name = ("total daily precipitation amount, "
-                           "assumed same for each day of month")
-        elif len(prcp) == (nc.hydro_yr_1 - nc.hydro_yr_0 + 1) * 12:
+        if (len(prcp) > (nc.hydro_yr_1 - nc.hydro_yr_0 + 1) * 28 * 12 and
+            temporal_resol == 'daily'):
+            if source == 'ERA5_daily':
+                v.long_name = ("total daily precipitation amount, "
+                               "assumed same for each day of month")
+            elif source == 'WFDE5_daily_cru':
+                v.long_name = ("total daily precipitation amount"
+                               "sum of snowfall and rainfall")
+        elif (len(prcp) == (nc.hydro_yr_1 - nc.hydro_yr_0 + 1) * 12
+              and temporal_resol == 'monthly'):
             v.long_name = 'total monthly precipitation amount'
         else:
-            v.long_name = 'total monthly precipitation amount'
-            warnings.warn("there might be a conflict in the prcp timeseries,"
-                          "please check!")
+            # v.long_name = 'total monthly precipitation amount'
+            raise InvalidParamsError('there is a conflict in the'
+                                     'prcp timeseries, '
+                                     'please check temporal_resol')
+            # warnings.warn("there might be a conflict in the prcp timeseries,"
+            #              "please check!")
 
         v[:] = prcp
 
         v = nc.createVariable('temp', 'f4', ('time',), zlib=zlib)
         v.units = 'degC'
-        if source == 'ERA5_daily' and len(temp) > (y1 - y0) * 30 * 12:
+        if ((source == 'ERA5_daily' or source == 'WFDE5_daily_cru') and
+            len(temp) > (y1 - y0) * 28 * 12 and temporal_resol == 'daily'):
             v.long_name = '2m daily temperature at height ref_hgt'
         elif source == 'ERA5_daily' and len(temp) <= (y1 - y0) * 30 * 12:
             raise InvalidParamsError('if the climate dataset (here source)'
                                      'is ERA5_daily, temperatures should be in'
                                      'daily resolution, please check or set'
                                      'set source to another climate dataset')
+        elif (source == 'WFDE5_daily_cru' and temporal_resol == 'monthly' and
+              len(temp) > (y1 - y0) * 28 * 12):
+            raise InvalidParamsError('something wrong in the implementation')
         else:
             v.long_name = '2m monthly temperature at height ref_hgt'
 
@@ -207,6 +238,231 @@ def write_climate_file(gdir, time, prcp, temp,
             v.units = 'degC'
             v.long_name = 'standard deviation of daily temperatures'
             v[:] = temp_std
+
+
+
+@entity_task(log, writes=['climate_historical_daily'])
+def process_wfde5_data(gdir, y0=None, y1=None, temporal_resol='daily',
+                       output_filesuffix='_daily',
+                       cluster = True):
+    """ TODO: let it work on the cluster first by giving there the right path...
+
+    Processes and writes the WFDE5 daily baseline climate data for a glacier.
+    into climate_historical_daily.nc
+
+    Extracts the nearest timeseries and writes everything to a NetCDF file.
+    This uses only the WFDE5 daily temperatures. The temperature lapse
+    rate are used from ERA5dr.
+
+    TODO: see _verified_download_helper no known hash for
+    wfde5_daily_t2m_1979-2018_flat.nc and wfde5_glacier_invariant_flat
+    ----------
+    y0 : int
+        the starting year of the timeseries to write. The default is to take
+        the entire time period available in the file, but with this kwarg
+        you can shorten it (to save space or to crop bad data)
+    y1 : int
+        the starting year of the timeseries to write. The default is to take
+        the entire time period available in the file, but with this kwarg
+        you can shorten it (to save space or to crop bad data)
+    temporal_resol : str
+        uses either daily (default) or monthly data
+    output_filesuffix : str
+        this add a suffix to the output file (useful to avoid overwriting
+        previous experiments)
+    cluster : bool
+        default is False, if this is run on the cluster, set it to True,
+        because we do not need to download the files
+
+    """
+
+    # wfde5_daily for temperature and precipitation
+    dataset = 'WFDE5_daily_cru'
+    # but need temperature lapse rates from ERA5
+    dataset_othervars = 'ERA5dr'
+
+    # get the central longitude/latitudes of the glacier
+    lon = gdir.cenlon + 360 if gdir.cenlon < 0 else gdir.cenlon
+    lat = gdir.cenlat
+
+    # cluster_path = '/home/www/oggm/climate/'
+    # cluster_path = '/home/users/lschuster/'
+    cluster_path = '/home/lilianschuster/Schreibtisch/PhD/WP0_bayesian/WPx_WFDE5/'
+    if cluster:
+        path_tmp = cluster_path + BASENAMES[dataset]['tmp']
+        path_prcp = cluster_path + BASENAMES[dataset]['prcp']
+        path_inv = cluster_path + BASENAMES[dataset]['inv']
+
+    else:
+        raise InvalidParamsError('not yet implemented...')
+        path_tmp = get_ecmwf_file(dataset, 'tmp')
+        path_prcp = get_ecmwf_file(dataset, 'pre')
+        path_inv = get_ecmwf_file(dataset, 'inv')
+
+
+
+    # Use xarray to read the data
+    # would go faster with netCDF -.-
+    # first temperature dataset
+    with xr.open_dataset(path_tmp) as ds:
+        assert ds.longitude.min() >= 0
+
+        # set temporal subset for the ts data (hydro years)
+        if gdir.hemisphere == 'nh':
+            sm = cfg.PARAMS['hydro_month_nh']
+        elif gdir.hemisphere == 'sh':
+            sm = cfg.PARAMS['hydro_month_sh']
+
+        em = sm - 1 if (sm > 1) else 12
+
+        yrs = ds['time.year'].data
+        y0 = yrs[0] if y0 is None else y0
+        y1 = yrs[-1] if y1 is None else y1
+
+        if y1 > 2018 or y0 < 1979:
+            text = 'The climate files only go from 1979--2018,\
+                choose another y0 and y1'
+            raise InvalidParamsError(text)
+        # if default settings: this is the last day in March or September
+        time_f = '{}-{:02d}'.format(y1, em)
+        end_day = int(ds.sel(time=time_f).time.dt.daysinmonth[-1].values)
+
+        #  this was tested also for hydro_month = 1
+        ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
+                               '{}-{:02d}-{}'.format(y1, em, end_day)))
+
+        try:
+            # computing all the distances and choose the nearest gridpoint
+            c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2
+            ds = ds.isel(points=c.argmin())
+        # I turned this around
+        except ValueError:
+            ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
+            # normally if I do the flattening, this here should not occur
+
+        # if we want to use monthly mean tempeatures of wfde5 and
+        # standard deviation of daily temperature:
+        if temporal_resol == 'monthly':
+            Tair_std = ds.resample(time='MS').std().Tair
+            temp_std = Tair_std.data
+            ds = ds.resample(time='MS').mean()
+            ds['longitude'] = ds.longitude.isel(time=0)
+            ds['latitude'] = ds.latitude.isel(time=0)
+        elif temporal_resol == 'daily':
+            temp_std = None
+        else:
+            raise InvalidParamsError('temporal_resol can only be monthly'
+                                     'or daily!')
+
+
+        # temperature should be in degree Celsius for the glacier climate files
+        temp = ds['Tair'].data - 273.15
+        time = ds.time.data
+
+        ref_lon = float(ds['longitude'])
+        ref_lat = float(ds['latitude'])
+
+        ref_lon = ref_lon - 360 if ref_lon > 180 else ref_lon
+
+    # precipitation: similar ar temperature
+    with xr.open_dataset(path_prcp) as ds:
+        assert ds.longitude.min() >= 0
+
+        yrs = ds['time.year'].data
+        y0 = yrs[0] if y0 is None else y0
+        y1 = yrs[-1] if y1 is None else y1
+        # Attention here we take the same y0 and y1 as given from the
+        # daily tmp dataset (goes till end of 2018)
+
+        # attention if daily data, need endday!!!
+        ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
+                               '{}-{:02d}-{}'.format(y1, em, end_day)))
+        try:
+            # wfde5 prcp is also flattened
+            c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2
+            ds = ds.isel(points=c.argmin())
+        except ValueError:
+            # this should not occur
+            ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
+
+        # if we want to use monthly summed up wfde5 precipitation:
+        if temporal_resol == 'monthly':
+            ds = ds.resample(time='MS').sum()
+        elif temporal_resol == 'daily':
+            pass
+        # the prcp data of wfde5 is in kg m-2 day-1 ~ mm/day
+        # or in kg m-2 month-1 ~ mm/month
+        prcp = ds['tp'].data  # * 1000
+        # just assume that precipitation is every day the same:
+        # prcp in daily reso prcp = np.repeat(prcp, ds['time.daysinmonth'])
+        # Attention the unit is now prcp per day
+        # (not per month as in OGGM default:
+        # prcp = ds['tp'].data * 1000 * ds['time.daysinmonth']
+
+    # wfde5 invariant file
+    with xr.open_dataset(path_inv) as ds:
+        assert ds.longitude.min() >= 0
+        ds = ds.isel(time=0)
+        try:
+            # Flattened wfde5_inv (only possibility at the moment)
+            c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2
+            ds = ds.isel(points=c.argmin())
+        except ValueError:
+            # this should not occur
+            ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
+
+        # wfde5 inv ASurf/hgt is already in hgt coordinates
+        # G = cfg.G  # 9.80665
+        hgt = ds['ASurf'].data  # / G
+
+
+    # here we need to use the ERA5dr data ...
+    # there are no lapse rates from wfde5 !!!
+    path_lapserates = get_ecmwf_file(dataset_othervars, 'lapserates')
+    with xr.open_dataset(path_lapserates) as ds:
+        assert ds.longitude.min() >= 0
+
+        yrs = ds['time.year'].data
+        y0 = yrs[0] if y0 is None else y0
+        y1 = yrs[-1] if y1 is None else y1
+        # Attention here we take the same y0 and y1 as given from the
+        # daily tmp dataset (goes till end of 2018)
+
+        ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
+                               '{}-{:02d}-01'.format(y1, em)))
+
+        # no flattening done for the ERA5dr gradient dataset
+        ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
+
+        # get the monthly gradient values
+        gradient = ds['lapserate'].data
+        if temporal_resol == 'monthly':
+            pass
+        elif temporal_resol == 'daily':
+            # gradient needs to be restructured to have values for each day
+            # when wfde5_daily is applied
+            gradient = np.repeat(gradient, ds['time.daysinmonth'])
+            # assume same gradient for each day
+
+    if temporal_resol == 'monthly':
+        if output_filesuffix == '_daily':
+            output_filesuffix = ''
+        dataset = 'WFDE5_monthly_cru'
+    elif temporal_resol == 'daily' and output_filesuffix =='':
+        output_filesuffix = '_daily'
+    # OK, ready to write
+    write_climate_file(gdir, time, prcp, temp, hgt, ref_lon, ref_lat,
+                       filesuffix=output_filesuffix,
+                       temporal_resol=temporal_resol,
+                       gradient=gradient,
+                       temp_std=temp_std,
+                       source=dataset,
+                       file_name='climate_historical')
+    # This is now a new function, maybe it would better to make a general
+    # process_daily_data function where ERA5_daily and WFDE5_daily 
+    # but is used, so far, only for ERA5_daily as source dataset ..
+
+
 
 
 @entity_task(log, writes=['climate_historical_daily'])
@@ -376,6 +632,7 @@ def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily',
     # OK, ready to write
     write_climate_file(gdir, time, prcp, temp, hgt, ref_lon, ref_lat,
                        filesuffix=output_filesuffix,
+                       temporal_resol='daily',
                        gradient=gradient,
                        temp_std=temp_std,
                        source=dataset,
@@ -402,7 +659,8 @@ class TIModel(MassBalanceModel):
                  temp_local_gradient_bounds=[-0.009, -0.003],
                  # check_climate=True,
                  SEC_IN_YEAR=SEC_IN_YEAR,
-                 SEC_IN_MONTH=SEC_IN_MONTH
+                 SEC_IN_MONTH=SEC_IN_MONTH,
+                 SEC_IN_DAY=SEC_IN_DAY
                  ):
         """ Initialize.
         Parameters
@@ -500,11 +758,10 @@ class TIModel(MassBalanceModel):
         # as self.prcp is produced by changing prcp_fac
         # so there is no self.prcp_fac here
         # and we need to update the prcp via prcp_fac by a property
-        # self.prcp_fac = prcp_fac
         if prcp_fac <= 0:
             raise InvalidParamsError('prcp_fac has to be above zero!')
-        self.inst_prcp_fac = prcp_fac
-        self._prcp_fac = prcp_fac # private attribute
+        # private attribute
+        self._prcp_fac = prcp_fac
         self.residual = residual
 
         # Parameters (from cfg.PARAMS in OGGM default)
@@ -526,6 +783,7 @@ class TIModel(MassBalanceModel):
 
         self.SEC_IN_YEAR = SEC_IN_YEAR
         self.SEC_IN_MONTH = SEC_IN_MONTH
+        self.SEC_IN_DAY = SEC_IN_DAY
 
         # check if the right climate is used for the right mb_type
         # these checks might be changed if there are more climate datasets
@@ -533,9 +791,11 @@ class TIModel(MassBalanceModel):
         # only have daily temperatures for 'ERA5_daily'
         baseline_climate = gdir.get_climate_info()['baseline_climate_source']
         if (self.mb_type == 'mb_real_daily' and
-                baseline_climate != 'ERA5_daily'):
+            (baseline_climate != 'ERA5_daily' and
+             baseline_climate != 'WFDE5_daily_cru')):
             text = ('wrong climate for mb_real_daily, need to do e.g. '
-                    'process_era5_daily_data(gd) to enable ERA5_daily')
+                    'process_era5_daily_data(gd) to enable ERA5_daily'
+                    'or process_wfde5_data(gd) for WFDE5_daily_cru')
             raise InvalidParamsError(text)
         # mb_monthly does not work when daily temperatures are used
         if self.mb_type == 'mb_monthly' and baseline_climate == 'ERA5_daily':
@@ -548,7 +808,8 @@ class TIModel(MassBalanceModel):
             oggm.shop.ecmwf.process_ecmwf_data(gd, dataset = "ERA5dr")'
             raise InvalidParamsError(text)
 
-        if baseline_climate == 'ERA5_daily':
+        if (baseline_climate == 'ERA5_daily' or
+            baseline_climate == 'WFDE5_daily_cru'):
             input_filesuffix = '_daily'
 
         # Read climate file
@@ -618,7 +879,7 @@ class TIModel(MassBalanceModel):
             self.temp = xr_nc['temp'].values
             # this is prcp computed by instantiation
             # this changes if prcp_fac is updated (see @property)
-            self.prcp = xr_nc['prcp'].values * self.inst_prcp_fac
+            self.prcp = xr_nc['prcp'].values * self._prcp_fac
 
             # lapse rate (temperature gradient)
             if self.grad_type == 'var' or self.grad_type == 'var_an_cycle':
@@ -676,13 +937,19 @@ class TIModel(MassBalanceModel):
                 raise InvalidParamsError('grad_type can be either cte,'
                                          'var or var_an_cycle')
             self.grad = grad
-            self.ref_hgt = xr_nc.ref_hgt
+            self.ref_hgt = xr_nc.ref_hgt  # xr_nc.uncorrected_ref_hgt
+            # ref_hgt
+            # if climate dataset has been corrected once again
+            # or non corrected reference height!
+            try:
+                self.uncorrected_ref_hgt = xr_nc.uncorrected_ref_hgt
+            except:
+                self.uncorrected_ref_hgt = xr_nc.ref_hgt
+            # xr_nc.ref_hgt
+
             self.ys = self.years[0] if ys is None else ys
             self.ye = self.years[-1] if ye is None else ye
 
-        # this does not work, will need to use it as a method instead ...
-        # if check_climate:
-        #    self.ref_hgt = historical_climate_qc_mod(self, gdir, fpath)
         self.fpath = fpath
 
     # copying Cat class idea ;-)
@@ -705,15 +972,12 @@ class TIModel(MassBalanceModel):
             raise InvalidParamsError('prcp_fac has to be above zero!')
         # attention, prcp_fac should not be called here
         # otherwise there is recursion occurring forever...
-        self._prcp_fac = new_prcp_fac
         # use new_prcp_fac to not get maximum recusion depth error
-        # self._recompute_prcp(new_prcp_fac)
-        self.prcp = self.prcp * new_prcp_fac / self.inst_prcp_fac
+        self.prcp = self.prcp * new_prcp_fac / self._prcp_fac
 
-        # prcp = self.prcp * self.prcp_fac / self._prcp_fac
         # update old prcp_fac in order that it can be updated
         # again ...
-        self.inst_prcp_fac = new_prcp_fac
+        self._prcp_fac = new_prcp_fac
 
 
     def historical_climate_qc_mod(self, gdir,
@@ -733,7 +997,7 @@ class TIModel(MassBalanceModel):
         when necessary), and at least one month where accumulation is possible
         at the glacier top (i.e. shifting the temperatures down).
 
-        TODO: why ist here not the temp_bias inside???
+        This has a similar effect as introducing a temperature bias
         """
 
         # # Parameters
@@ -775,11 +1039,13 @@ class TIModel(MassBalanceModel):
         # Parameters (from cfg.PARAMS in OGGM defaul
         fpath = self.fpath
         grad = self.grad
-        ref_hgt = self.ref_hgt
+        # get non-corrected quality check
+        ref_hgt = self.uncorrected_ref_hgt
         itemp = self.temp
         temp_m = self.t_melt
         temp_s = (self.t_liq + self.t_solid) / 2
-        if cfg.PARAMS['baseline_climate'] == 'ERA5_daily':
+        if (cfg.PARAMS['baseline_climate'] == 'ERA5_daily' or
+            cfg.PARAMS['baseline_climate'] == 'WFDE5_daily_cru'):
             # different amount of days per year ...
             d_m = 30
             pass
@@ -888,6 +1154,8 @@ class TIModel(MassBalanceModel):
 
         if self.mb_type == 'mb_real_daily' or climate_type == 'annual':
             if climate_type == 'annual':
+                if type(year) == float:
+                    raise InvalidParamsError('')
                 pok = np.where(self.years == year)[0]
                 if len(pok) < 1:
                     raise ValueError('Year {} not in record'.format(int(year)))
@@ -946,6 +1214,8 @@ class TIModel(MassBalanceModel):
             raise InvalidParamsError('_get_2d_monthly_climate works only\
                                      with mb_real_daily as mb_type!!!')
 
+
+
     def get_monthly_climate(self, heights, year=None):
         # first get the climate data
         Warning('Attention: this has not been tested enough to be sure that \
@@ -959,9 +1229,14 @@ class TIModel(MassBalanceModel):
             return self._get_climate(heights, 'monthly', year=year)
             # if it is mb_real_daily, the data has daily resolution
 
+    def get_daily_climate(self, heights, year = None):
+        raise NotImplementedError('look at _get_2d_daily_climate instead')
+
     def _get_2d_annual_climate(self, heights, year):
         return self._get_climate(heights, 'annual', year=year)
 
+    def _get_2d_daily_climate(self, heights, year = None):
+        return self._get_climate(heights, 'annual', year=year)
     # If I also want to use this outside of the class because
     # (e.g. in climate.py), I have to change this again and remove the self...
     # and somehow there is aproblem if I put not self in
@@ -1046,10 +1321,14 @@ class TIModel(MassBalanceModel):
                 prcp.sum(axis=1), prcpsol.sum(axis=1))
 
     def get_monthly_mb(self, heights, year=None, **kwargs):
-        """ computes annual mass balance in kg /m² /month
+        """ computes annual mass balance in kg /m² /second
 
         Attention year is here in hydro float year
 
+        year has to be given as float hydro year from what the month is taken,
+        hence year 2000 -> y=2000, m = 1, & year = 2000.09, y=2000, m=2 ...
+        which corresponds to the real year 1999 an months October or November
+        if hydro year starts in October
         """
         # get_monthly_mb and get_annual_mb are only different
         # to OGGM default for mb_real_daily
@@ -1058,11 +1337,13 @@ class TIModel(MassBalanceModel):
             # get 2D values, dependencies on height and time (days)
             out = self._get_2d_monthly_climate(heights, year)
             _, temp2dformelt, _, prcpsol = out
-            # 1 / (days per month)
-            fact = 1/len(prcpsol.T)
+            #(days per month)
+            dom = 365.25/12  # len(prcpsol.T)
+            # attention, I should not use the days of years as the melt_f is
+            # per month ~mean days of that year 12/daysofyear
             # to have the same unit of melt_f, which is
             # the monthly temperature sensitivity (kg /m² /mth /K),
-            mb_daily = prcpsol - self.melt_f * temp2dformelt * fact
+            mb_daily = prcpsol - (self.melt_f/dom) * temp2dformelt
 
             mb_month = np.sum(mb_daily, axis=1)
             # more correct than using a mean value for days in a month
@@ -1075,7 +1356,8 @@ class TIModel(MassBalanceModel):
             _, tmelt, _, prcpsol = self.get_monthly_climate(heights, year=year)
             mb_month = prcpsol - self.melt_f * tmelt
 
-        # residual is in general, so SEC_IN_MONTH .. can be used
+        # residual is in mm w.e per year, so SEC_IN_MONTH .. but mb_month
+        # shoud be per month!
         mb_month -= self.residual * self.SEC_IN_MONTH / self.SEC_IN_YEAR
         # this is for mb_daily otherwise it gives the wrong shape
         mb_month = mb_month.flatten()
@@ -1095,9 +1377,74 @@ class TIModel(MassBalanceModel):
             # in this case we have the temp2dformelt for each day
             # but self.melt_f is in per month -> divide trough days/month
             # more correct than using a mean value for days in a year
-            fact = 12/len(prcpsol.T)
+            fact = 12/365.25
+            # len(prcpsol.T): make it more consistent as melt_f is described
+            # per month independent of which month it is ...
         else:
-            fact = 1
+            fact = 1  # eventually correct here with 365.25
         mb_annual = np.sum(prcpsol - self.melt_f * temp2dformelt*fact,
                            axis=1)
         return (mb_annual - self.residual) / self.SEC_IN_YEAR / self.rho
+
+    def get_daily_mb(self, heights, year = None):
+                     #, m = None,
+                     #float_year=None, **kwargs):
+        """computes daily mass balance in kg/m2/second
+
+        year has to be given as float hydro year from what the month is taken,
+        hence year 2000 -> y=2000, m = 1, & year = 2000.09, y=2000, m=2 ...
+        which corresponds to the real year 1999 an months October or November
+        if hydro year starts in October
+
+        """
+
+        # todo: make this more user friendly
+        if type(year)==float:
+            raise InvalidParamsError('here year has to be the integer year')
+        else:
+            pass
+        #if y==None:
+        #    year = date_to_floatyear(y, m)
+        ##elif y==None and m!=None:
+        #    raise InvalidParamsError('give y or only give float_year'
+        #                             'and no month m')
+        #else:
+        #    year = float_year
+        if self.mb_type == 'mb_real_daily':
+            # get 2D values, dependencies on height and time (days)
+            out = self._get_2d_daily_climate(heights, year)
+            _, temp2dformelt, _, prcpsol = out
+            # days of year
+            doy = 365.25 #len(prcpsol.T)
+            # assert doy > 360
+            # to have the same unit of melt_f, which is
+            # the monthly temperature sensitivity (kg /m² /mth /K),
+            melt_f_daily = self.melt_f * 12/doy
+            mb_daily = prcpsol - melt_f_daily * temp2dformelt
+
+            # mb_month = np.sum(mb_daily, axis=1)
+            # more correct than using a mean value for days in a month
+            warnings.warn('get_daily_mb has not been tested enough,')
+
+            # residual is in mm w.e per year, so SEC_IN_MONTH .. but mb_daily
+            # is per day!
+            mb_daily -= self.residual * self.SEC_IN_DAY / self.SEC_IN_YEAR
+            # this is for mb_daily otherwise it gives the wrong shape
+            # mb_daily = mb_month.flatten()
+            # instead of SEC_IN_MONTH, use instead len(prcpsol.T)==daysinmonth
+            return mb_daily / self.SEC_IN_DAY / self.rho
+        else:
+            raise InvalidParamsError('get_daily_mb works only with'
+                                     'mb_real_daily as mb_type!')
+
+    def get_specific_daily_mb(self, heights=None, widths=None, year=None):
+        " returns specific daily mass balance in kg m-2 day "
+        if len(np.atleast_1d(year)) > 1:
+            out = [self.get_specific_daily_mb(heights=heights, widths=widths,
+                                        year=yr) for yr in year]
+            return np.asarray(out)
+
+        mb = self.get_daily_mb(heights, year=year)
+        spec_mb = np.average(mb * self.rho * SEC_IN_DAY, weights=widths, axis=0)
+        assert len(spec_mb) > 360
+        return spec_mb
