@@ -401,7 +401,7 @@ class Test_directobs_hydro10:
                         yrp = [1980, 2018]
                         for i, yr in enumerate(np.arange(yrp[0], yrp[1]+1)):
                             my_mon_mb_on_h = 0.
-                            dayofyear = 0
+                            dayofyear = 0.
                             for m in np.arange(12):
                                 yrm = utils.date_to_floatyear(yr, m + 1)
                                 _, dayofmonth = monthrange(yr, m+1)
@@ -416,7 +416,7 @@ class Test_directobs_hydro10:
                             # different amount of days in a year
                             assert_allclose(np.mean(my_an_mb_on_h -
                                                     my_mon_mb_on_h),
-                                            0, atol=10)
+                                            0, atol=50)
 
     def test_daily_monthly_annual_specific_mb(self, gdir):
         # for both ERA5 and WFDE5
@@ -636,11 +636,11 @@ class Test_directobs_hydro10:
                         grad_type='cte')
         assert gd_mb.prcp_fac == 2.5
         assert gd_mb._prcp_fac == 2.5
-        prcp_old = gd_mb.prcp  # .mean()
+        prcp_old = gd_mb.prcp.copy()  # .mean()
         gd_mb.prcp_fac = 10
         assert gd_mb.prcp_fac == 10
         assert gd_mb._prcp_fac == 10
-        prcp_old_regen = 2.5 * gd_mb.prcp / gd_mb.prcp_fac
+        prcp_old_regen = gd_mb.prcp * 2.5 / gd_mb.prcp_fac
         assert_allclose(prcp_old_regen, prcp_old)
 
         # print(gd_mb._prcp_fac)

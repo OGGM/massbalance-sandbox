@@ -31,7 +31,7 @@ from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH, SEC_IN_DAY
 from oggm.utils import (floatyear_to_date, date_to_floatyear, ncDataset,
                         clip_min, clip_array)
 from oggm.utils._funcs import haversine
-from oggm.exceptions import InvalidParamsError
+from oggm.exceptions import InvalidParamsError, InvalidWorkflowError
 from oggm.shop.ecmwf import get_ecmwf_file, BASENAMES
 from oggm.core.massbalance import MassBalanceModel
 
@@ -243,8 +243,9 @@ def write_climate_file(gdir, time, prcp, temp,
 
 @entity_task(log, writes=['climate_historical_daily'])
 def process_wfde5_data(gdir, y0=None, y1=None, temporal_resol='daily',
-                       output_filesuffix='_daily',
-                       cluster = True):
+                       output_filesuffix='_daily_wfde5_cru',
+                       cluster = True,
+                       climate_path='/home/lilianschuster/Schreibtisch/PhD/WP0_bayesian/WPx_WFDE5/'):
     """ TODO: let it work on the cluster first by giving there the right path...
 
     Processes and writes the WFDE5 daily baseline climate data for a glacier.
@@ -287,11 +288,10 @@ def process_wfde5_data(gdir, y0=None, y1=None, temporal_resol='daily',
 
     # cluster_path = '/home/www/oggm/climate/'
     # cluster_path = '/home/users/lschuster/'
-    cluster_path = '/home/lilianschuster/Schreibtisch/PhD/WP0_bayesian/WPx_WFDE5/'
     if cluster:
-        path_tmp = cluster_path + BASENAMES[dataset]['tmp']
-        path_prcp = cluster_path + BASENAMES[dataset]['prcp']
-        path_inv = cluster_path + BASENAMES[dataset]['inv']
+        path_tmp = climate_path + BASENAMES[dataset]['tmp']
+        path_prcp = climate_path + BASENAMES[dataset]['prcp']
+        path_inv = climate_path + BASENAMES[dataset]['inv']
 
     else:
         raise InvalidParamsError('not yet implemented...')
@@ -448,7 +448,7 @@ def process_wfde5_data(gdir, y0=None, y1=None, temporal_resol='daily',
         if output_filesuffix == '_daily':
             output_filesuffix = ''
         dataset = 'WFDE5_monthly_cru'
-    elif temporal_resol == 'daily' and output_filesuffix =='':
+    elif temporal_resol == 'daily' and output_filesuffix == '':
         output_filesuffix = '_daily'
     # OK, ready to write
     write_climate_file(gdir, time, prcp, temp, hgt, ref_lon, ref_lat,
@@ -461,8 +461,6 @@ def process_wfde5_data(gdir, y0=None, y1=None, temporal_resol='daily',
     # This is now a new function, maybe it would better to make a general
     # process_daily_data function where ERA5_daily and WFDE5_daily 
     # but is used, so far, only for ERA5_daily as source dataset ..
-
-
 
 
 @entity_task(log, writes=['climate_historical_daily'])
@@ -722,8 +720,6 @@ class TIModel(MassBalanceModel):
         t_melt : float
             temperature threshold where snow/ice melts
             (degree Celsius, default 0)
-        prcp_fac : float, >0
-            multiplicative precipitation correction factor (default 2.5)
         default_grad : float,
             constant lapse rate (temperature gradient, default: -0.0065 m/K)
             if grad_type != cte, then this value is not used
@@ -745,9 +741,8 @@ class TIModel(MassBalanceModel):
         ----------
         temp_bias : float, default 0
             Add a temperature bias to the time series
-        prcp_bias : float, default 1
-            Precipitation factor to the time series (called bias for
-            consistency with `temp_bias`)
+        prcp_fac : float, >0
+            multiplicative precipitation correction factor (default 2.5)
         """
         # melt_f is only initiated here, and not used in __init__.py
         # so it does not matter if it is changed
@@ -760,8 +755,12 @@ class TIModel(MassBalanceModel):
         # and we need to update the prcp via prcp_fac by a property
         if prcp_fac <= 0:
             raise InvalidParamsError('prcp_fac has to be above zero!')
-        # private attribute
+        #  to allow prcp_fac to be changed after instantiation
+        #  prescribe the prcp_fac as it is instantiated
         self._prcp_fac = prcp_fac
+        # same for temp bias
+        self._temp_bias = 0.
+
         self.residual = residual
 
         # Parameters (from cfg.PARAMS in OGGM default)
@@ -777,8 +776,6 @@ class TIModel(MassBalanceModel):
 
         # Public attrs
         self.hemisphere = gdir.hemisphere
-        self.temp_bias = 0.
-        self.prcp_bias = 1.
         self.repeat = repeat
 
         self.SEC_IN_YEAR = SEC_IN_YEAR
@@ -823,7 +820,7 @@ class TIModel(MassBalanceModel):
                 self.temp_std = np.NaN
             else:
                 try:
-                    self.temp_std = xr_nc['temp_std'].values
+                    self.temp_std = xr_nc['temp_std'].values.astype(np.float64)
                 except KeyError:
                     text = ('The applied climate has no temp std, do e.g.'
                             'oggm.shop.ecmwf.process_ecmwf_data'
@@ -875,16 +872,17 @@ class TIModel(MassBalanceModel):
                 self.years = pd_test['hydro_year'].values
                 ny = self.years[-1] - self.years[0]+1
                 self.months = pd_test['hydro_month'].values
-            # Read timeseries
-            self.temp = xr_nc['temp'].values
+            # Read timeseries and correct it
+            self.temp = xr_nc['temp'].values.astype(np.float64) + self._temp_bias
             # this is prcp computed by instantiation
             # this changes if prcp_fac is updated (see @property)
-            self.prcp = xr_nc['prcp'].values * self._prcp_fac
+            self.prcp = xr_nc['prcp'].values.astype(np.float64) * self._prcp_fac
+
 
             # lapse rate (temperature gradient)
             if self.grad_type == 'var' or self.grad_type == 'var_an_cycle':
                 try:
-                    grad = xr_nc['gradient'].values
+                    grad = xr_nc['gradient'].values.astype(np.float64)
                     # Security for stuff that can happen with local gradients
                     g_minmax = temp_local_gradient_bounds
 
@@ -960,10 +958,6 @@ class TIModel(MassBalanceModel):
         '''
         return self._prcp_fac
 
-    #def _recompute_prcp(self, new_prcp_fac):
-
-
-
     @prcp_fac.setter
     def prcp_fac(self, new_prcp_fac):
         '''
@@ -973,12 +967,21 @@ class TIModel(MassBalanceModel):
         # attention, prcp_fac should not be called here
         # otherwise there is recursion occurring forever...
         # use new_prcp_fac to not get maximum recusion depth error
-        self.prcp = self.prcp * new_prcp_fac / self._prcp_fac
-
+        self.prcp *= new_prcp_fac / self._prcp_fac
         # update old prcp_fac in order that it can be updated
         # again ...
         self._prcp_fac = new_prcp_fac
 
+    # same for temp_bias:
+    @property
+    def temp_bias(self):
+        return self._temp_bias
+
+    @temp_bias.setter
+    def temp_bias(self, new_temp_bias):
+        self.temp += new_temp_bias - self._temp_bias
+        # update old temp_bias in order that it can be updated again ...
+        self._temp_bias = new_temp_bias
 
     def historical_climate_qc_mod(self, gdir,
                                   # t_solid=0, t_liq=2, t_melt=0, prcp_fac=2.5,
@@ -1037,6 +1040,10 @@ class TIModel(MassBalanceModel):
         #     igrad = itemp * 0 + default_grad
 
         # Parameters (from cfg.PARAMS in OGGM defaul
+        if self.temp_bias != 0:
+            raise InvalidParamsError('either use no temp_bias or do no quality'
+                                     'check corrections, as they have the '
+                                     'same effects!')
         fpath = self.fpath
         grad = self.grad
         # get non-corrected quality check
@@ -1154,8 +1161,8 @@ class TIModel(MassBalanceModel):
 
         if self.mb_type == 'mb_real_daily' or climate_type == 'annual':
             if climate_type == 'annual':
-                if type(year) == float:
-                    raise InvalidParamsError('')
+                #if type(year) == float:
+                #    raise InvalidParamsError('')
                 pok = np.where(self.years == year)[0]
                 if len(pok) < 1:
                     raise ValueError('Year {} not in record'.format(int(year)))
@@ -1167,8 +1174,9 @@ class TIModel(MassBalanceModel):
         else:
             pok = np.where((self.years == y) & (self.months == m))[0][0]
         # Read timeseries
-        itemp = self.temp[pok] + self.temp_bias
-        iprcp = self.prcp[pok] * self.prcp_bias
+        # (already temperature bias and precipitation factor corrected!)
+        itemp = self.temp[pok]
+        iprcp = self.prcp[pok]
         igrad = self.grad[pok]
 
         # For each height pixel:
@@ -1448,3 +1456,236 @@ class TIModel(MassBalanceModel):
         spec_mb = np.average(mb * self.rho * SEC_IN_DAY, weights=widths, axis=0)
         assert len(spec_mb) > 360
         return spec_mb
+
+# copy of MultipleFlowlineMassBalance that works with TIModel
+class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
+    """ TODO: adapt this: main changes are mu_star -> melt_f
+    Handle mass-balance at the glacier level instead of flowline level.
+
+    Convenience class doing not much more than wrapping a list of mass-balance
+    models, one for each flowline.
+
+    This is useful for real-case studies, where each flowline might have a
+    different mu*.
+
+    Attributes
+    ----------
+    fls : list
+        list of flowline objects
+    mb_models : list
+        list of mass-balance objects
+    """
+
+    def __init__(self, gdir, fls=None, melt_f=None, prcp_fac=None,
+                 mb_model_class=TIModel, use_inversion_flowlines=False,
+                 input_filesuffix='', bias=None, **kwargs):
+        """Initialize.
+
+        Parameters
+        ----------
+        gdir : GlacierDirectory
+            the glacier directory
+        mu_star : float or list of floats, optional
+            set to the alternative value of mu* you want to use
+            (the default is to use the calibrated value). Give a list of values
+            for flowline-specific mu*
+        fls : list, optional
+            list of flowline objects to use (defaults to 'model_flowlines',
+            and if not available, to 'inversion_flowlines')
+        mb_model_class : class, optional
+            the mass-balance model to use (e.g. PastMassBalance,
+            ConstantMassBalance...)
+        use_inversion_flowlines: bool, optional
+            if True 'inversion_flowlines' instead of 'model_flowlines' will be
+            used.
+        input_filesuffix : str
+            the file suffix of the input climate file
+        bias : float, optional
+            set to the alternative value of the calibration bias [mm we yr-1]
+            you want to use (the default is to use the calibrated value)
+            Note that this bias is *substracted* from the computed MB. Indeed:
+            BIAS = MODEL_MB - REFERENCE_MB.
+        kwargs : kwargs to pass to mb_model_class
+        """
+
+        # Read in the flowlines
+        if use_inversion_flowlines:
+            fls = gdir.read_pickle('inversion_flowlines')
+
+        if fls is None:
+            try:
+                fls = gdir.read_pickle('model_flowlines')
+            except FileNotFoundError:
+                raise InvalidWorkflowError('Need a valid `model_flowlines` '
+                                           'file. If you explicitly want to '
+                                           'use `inversion_flowlines`, set '
+                                           'use_inversion_flowlines=True.')
+
+        self.fls = fls
+        _y0 = kwargs.get('y0', None)
+
+
+        # Initialise the mb models
+        self.flowline_mb_models = []
+        for fl in self.fls:
+            # Merged glaciers will need different climate files, use filesuffix
+            if (fl.rgi_id is not None) and (fl.rgi_id != gdir.rgi_id):
+                rgi_filesuffix = '_' + fl.rgi_id + input_filesuffix
+            else:
+                rgi_filesuffix = input_filesuffix
+
+            # merged glaciers also have a different MB bias from calibration
+            if ((bias is None) and cfg.PARAMS['use_bias_for_run'] and
+                    (fl.rgi_id != gdir.rgi_id)):
+                df = gdir.read_json('local_mustar', filesuffix='_' + fl.rgi_id)
+                fl_bias = df['bias']
+            else:
+                fl_bias = bias
+
+            # Constant and RandomMassBalance need y0 if not provided
+            #if (issubclass(mb_model_class, RandomMassBalance) or
+            #    issubclass(mb_model_class, ConstantMassBalance)) and (
+            #        fl.rgi_id != gdir.rgi_id) and (_y0 is None):#
+
+            #    df = gdir.read_json('local_mustar', filesuffix='_' + fl.rgi_id)
+            #    kwargs['y0'] = df['t_star']
+
+            if (issubclass(mb_model_class, TIModel)):
+                self.flowline_mb_models.append(
+                    mb_model_class(gdir, melt_f, prcp_fac = prcp_fac,
+                                   residual=fl_bias,
+                                   input_filesuffix=rgi_filesuffix, **kwargs))
+            else:
+                self.flowline_mb_models.append(
+                    mb_model_class(gdir, mu_star=fl.mu_star, bias=fl_bias,
+                                   input_filesuffix=rgi_filesuffix, **kwargs))
+
+        # self.valid_bounds = self.flowline_mb_models[-1].valid_bounds
+        self.hemisphere = gdir.hemisphere
+
+    @property
+    def temp_bias(self):
+        """Temperature bias to add to the original series."""
+        return self.flowline_mb_models[0].temp_bias
+
+    @temp_bias.setter
+    def temp_bias(self, value):
+        """Temperature bias to add to the original series."""
+        for mbmod in self.flowline_mb_models:
+            mbmod.temp_bias = value
+
+    @property
+    def prcp_fac(self):
+        """Precipitation factor to apply to the original series."""
+        return self.flowline_mb_models[0].prcp_fac
+
+    @prcp_fac.setter
+    def prcp_fac(self, value):
+        """Precipitation factor to apply to the original series."""
+        for mbmod in self.flowline_mb_models:
+            mbmod.prcp_fac = value
+
+    @property
+    def bias(self):
+        """Residual bias to apply to the original series."""
+        return self.flowline_mb_models[0].bias
+
+    @bias.setter
+    def bias(self, value):
+        """Residual bias to apply to the original series."""
+        for mbmod in self.flowline_mb_models:
+            mbmod.bias = value
+
+    def get_monthly_mb(self, heights, year=None, fl_id=None, **kwargs):
+
+        if fl_id is None:
+            raise ValueError('`fl_id` is required for '
+                             'MultipleFlowlineMassBalance!')
+
+        return self.flowline_mb_models[fl_id].get_monthly_mb(heights,
+                                                             year=year)
+
+    def get_annual_mb(self, heights, year=None, fl_id=None, **kwargs):
+
+        if fl_id is None:
+            raise ValueError('`fl_id` is required for '
+                             'MultipleFlowlineMassBalance!')
+
+        return self.flowline_mb_models[fl_id].get_annual_mb(heights,
+                                                            year=year)
+
+    def get_annual_mb_on_flowlines(self, fls=None, year=None):
+        """Get the MB on all points of the glacier at once.
+
+        Parameters
+        ----------
+        fls: list, optional
+            the list of flowlines to get the mass-balance from. Defaults
+            to self.fls
+        year: float, optional
+            the time (in the "floating year" convention)
+        Returns
+        -------
+        Tuple of (heights, widths, mass_balance) 1D arrays
+        """
+
+        if fls is None:
+            fls = self.fls
+
+        heights = []
+        widths = []
+        mbs = []
+        for i, fl in enumerate(fls):
+            h = fl.surface_h
+            heights = np.append(heights, h)
+            widths = np.append(widths, fl.widths)
+            mbs = np.append(mbs, self.get_annual_mb(h, year=year, fl_id=i))
+
+        return heights, widths, mbs
+
+    def get_specific_mb(self, heights=None, widths=None, fls=None,
+                        year=None):
+
+        if heights is not None or widths is not None:
+            raise ValueError('`heights` and `widths` kwargs do not work with '
+                             'MultipleFlowlineMassBalance!')
+
+        if fls is None:
+            fls = self.fls
+
+        if len(np.atleast_1d(year)) > 1:
+            out = [self.get_specific_mb(fls=fls, year=yr) for yr in year]
+            return np.asarray(out)
+
+        mbs = []
+        widths = []
+        for i, (fl, mb_mod) in enumerate(zip(self.fls, self.flowline_mb_models)):
+            _widths = fl.widths
+            try:
+                # For rect and parabola don't compute spec mb
+                _widths = np.where(fl.thick > 0, _widths, 0)
+            except AttributeError:
+                pass
+            widths = np.append(widths, _widths)
+            mb = mb_mod.get_annual_mb(fl.surface_h, year=year, fls=fls, fl_id=i)
+            mbs = np.append(mbs, mb * SEC_IN_YEAR * mb_mod.rho)
+
+        return np.average(mbs, weights=widths)
+
+    def get_ela(self, year=None, **kwargs):
+
+        # ELA here is not without ambiguity.
+        # We compute a mean weighted by area.
+
+        if len(np.atleast_1d(year)) > 1:
+            return np.asarray([self.get_ela(year=yr) for yr in year])
+
+        elas = []
+        areas = []
+        for fl_id, (fl, mb_mod) in enumerate(zip(self.fls,
+                                                 self.flowline_mb_models)):
+            elas = np.append(elas, mb_mod.get_ela(year=year, fl_id=fl_id,
+                                                  fls=self.fls))
+            areas = np.append(areas, np.sum(fl.widths))
+
+        return np.average(elas, weights=areas)

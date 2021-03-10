@@ -190,8 +190,8 @@ class Test_process_era5_daily_wfde5_hef:
         # first with daily resolution
         process_wfde5_data(gdir, y0=1979, y1=2018, temporal_resol='daily')
 
-        filename = 'climate_historical_daily'
-        fpath = gdir.get_filepath(filename)
+        filename = 'climate_historical'
+        fpath = gdir.get_filepath(filename, filesuffix='_daily_wfde5_cru')
 
         # check the climate files of an individual glacier (Hintereisferner)
         xr_nc = xr.open_dataset(fpath)
@@ -225,12 +225,12 @@ class Test_process_era5_daily_wfde5_hef:
         # dataset equals approx to the WFDE5 monthly prcp
         # first with daily resolution
         process_wfde5_data(gdir, y0=1979, y1=2018, temporal_resol='monthly',
-                           output_filesuffix='wfde5_monthly')
+                           output_filesuffix='_monthly_wfde5_cru')
         # an output filesuffix is needed, otherwise the
         # ERA5 dataset from above is used as it has the same name ...
         filename = 'climate_historical'
         fpath_monthly = gdir.get_filepath(filename,
-                                          filesuffix='wfde5_monthly')
+                                          filesuffix='_monthly_wfde5_cru')
         xr_nc_monthly = xr.open_dataset(fpath_monthly)
         assert np.all(xr_nc_monthly.prcp) > 0
         # to be sure that there are no erroneous filling values inside
