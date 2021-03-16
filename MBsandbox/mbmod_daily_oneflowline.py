@@ -59,6 +59,7 @@ BASENAMES['WFDE5_daily_cru'] = {
     }
 
 
+
 # this could be used in general
 def write_climate_file(gdir, time, prcp, temp,
                        ref_pix_hgt, ref_pix_lon, ref_pix_lat,
@@ -243,7 +244,7 @@ def write_climate_file(gdir, time, prcp, temp,
 
 @entity_task(log, writes=['climate_historical_daily'])
 def process_wfde5_data(gdir, y0=None, y1=None, temporal_resol='daily',
-                       output_filesuffix='_daily_wfde5_cru',
+                       output_filesuffix='_daily_WFDE5_CRU',
                        cluster = True,
                        climate_path='/home/lilianschuster/Schreibtisch/PhD/WP0_bayesian/WPx_WFDE5/'):
     """ TODO: let it work on the cluster first by giving there the right path...
@@ -650,7 +651,6 @@ class TIModel(MassBalanceModel):
     def __init__(self, gdir, melt_f, residual=0,
                  mb_type='mb_daily', N=100, loop=False,
                  grad_type='cte', filename='climate_historical',
-                 input_filesuffix='',
                  repeat=False, ys=None, ye=None,
                  t_solid=0, t_liq=2, t_melt=0, prcp_fac=2.5,
                  default_grad=-0.0065,
@@ -658,7 +658,8 @@ class TIModel(MassBalanceModel):
                  # check_climate=True,
                  SEC_IN_YEAR=SEC_IN_YEAR,
                  SEC_IN_MONTH=SEC_IN_MONTH,
-                 SEC_IN_DAY=SEC_IN_DAY
+                 SEC_IN_DAY=SEC_IN_DAY,
+                 baseline_climate=None,
                  ):
         """ Initialize.
         Parameters
@@ -786,28 +787,35 @@ class TIModel(MassBalanceModel):
         # these checks might be changed if there are more climate datasets
         # available!!!
         # only have daily temperatures for 'ERA5_daily'
-        baseline_climate = gdir.get_climate_info()['baseline_climate_source']
+        if baseline_climate == None:
+            baseline_climate = gdir.get_climate_info()['baseline_climate_source']
+
+        if mb_type != 'mb_real_daily':
+            # cfg.PARAMS['baseline_climate'] = 'ERA5dr'
+            input_filesuffix = '_monthly_{}'.format(baseline_climate)
+        else:
+            # this is just the climate "type"
+            # cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
+            input_filesuffix = '_daily_{}'.format(baseline_climate)
+
+        self._input_filesuffix = input_filesuffix
         if (self.mb_type == 'mb_real_daily' and
-            (baseline_climate != 'ERA5_daily' and
-             baseline_climate != 'WFDE5_daily_cru')):
+            (baseline_climate != 'ERA5dr' and
+             baseline_climate != 'WFDE5_CRU')):
             text = ('wrong climate for mb_real_daily, need to do e.g. '
-                    'process_era5_daily_data(gd) to enable ERA5_daily'
-                    'or process_wfde5_data(gd) for WFDE5_daily_cru')
+                    'process_era5_daily_data(gd) to produce daily_ERA5dr'
+                    'or process_wfde5_data(gd) for daily_WFDE5_CRU')
             raise InvalidParamsError(text)
         # mb_monthly does not work when daily temperatures are used
-        if self.mb_type == 'mb_monthly' and baseline_climate == 'ERA5_daily':
+        if self.mb_type == 'mb_monthly' and input_filesuffix == 'daily_ERA5dr':
             text = ('wrong climate for mb_monthly, need to do e.g.'
                     'oggm.shop.ecmwf.process_ecmwf_data(gd, dataset="ERA5dr")')
             raise InvalidParamsError(text)
         # mb_daily needs temp_std
-        if self.mb_type == 'mb_daily' and baseline_climate == 'ERA5_daily':
+        if self.mb_type == 'mb_daily' and input_filesuffix == 'daily_ERA5dr':
             text = 'wrong climate for mb_daily, need to do e.g. \
             oggm.shop.ecmwf.process_ecmwf_data(gd, dataset = "ERA5dr")'
             raise InvalidParamsError(text)
-
-        if (baseline_climate == 'ERA5_daily' or
-            baseline_climate == 'WFDE5_daily_cru'):
-            input_filesuffix = '_daily'
 
         # Read climate file
         fpath = gdir.get_filepath(filename, filesuffix=input_filesuffix)
@@ -1051,8 +1059,7 @@ class TIModel(MassBalanceModel):
         itemp = self.temp
         temp_m = self.t_melt
         temp_s = (self.t_liq + self.t_solid) / 2
-        if (cfg.PARAMS['baseline_climate'] == 'ERA5_daily' or
-            cfg.PARAMS['baseline_climate'] == 'WFDE5_daily_cru'):
+        if ('daily' in self._input_filesuffix):
             # different amount of days per year ...
             d_m = 30
             pass
@@ -1478,7 +1485,8 @@ class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
 
     def __init__(self, gdir, fls=None, melt_f=None, prcp_fac=None,
                  mb_model_class=TIModel, use_inversion_flowlines=False,
-                 input_filesuffix='', bias=None, **kwargs):
+                 input_filesuffix='', bias=None, 
+                 **kwargs):
         """Initialize.
 
         Parameters
@@ -1553,8 +1561,8 @@ class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
             if (issubclass(mb_model_class, TIModel)):
                 self.flowline_mb_models.append(
                     mb_model_class(gdir, melt_f, prcp_fac = prcp_fac,
-                                   residual=fl_bias,
-                                   input_filesuffix=rgi_filesuffix, **kwargs))
+                                   residual=fl_bias,baseline_climate=rgi_filesuffix,
+                                    **kwargs))
             else:
                 self.flowline_mb_models.append(
                     mb_model_class(gdir, mu_star=fl.mu_star, bias=fl_bias,

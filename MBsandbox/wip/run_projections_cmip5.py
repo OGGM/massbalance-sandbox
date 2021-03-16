@@ -52,10 +52,7 @@ if cluster:
     working_dir = '/home/users/lschuster/oggm_files/projections'
 else:
     working_dir = '/home/lilianschuster/Schreibtisch/PhD/oggm_files/projections'
-# this needs to be changed if working on another computer
-if not os.path.exists(working_dir):
-    working_dir = utils.gettempdir(dirname='OGGM_mb_type_projections',
-                                   reset=False)
+
 
 cfg.PATHS['working_dir'] = working_dir
 # use Huss flowlines
