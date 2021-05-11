@@ -59,6 +59,7 @@ BASENAMES['WFDE5_daily_cru'] = {
     }
 
 
+
 # this could be used in general
 def write_climate_file(gdir, time, prcp, temp,
                        ref_pix_hgt, ref_pix_lon, ref_pix_lat,
@@ -243,7 +244,7 @@ def write_climate_file(gdir, time, prcp, temp,
 
 @entity_task(log, writes=['climate_historical_daily'])
 def process_wfde5_data(gdir, y0=None, y1=None, temporal_resol='daily',
-                       output_filesuffix='_daily_wfde5_cru',
+                       output_filesuffix='_daily_WFDE5_CRU',
                        cluster = True,
                        climate_path='/home/lilianschuster/Schreibtisch/PhD/WP0_bayesian/WPx_WFDE5/'):
     """ TODO: let it work on the cluster first by giving there the right path...
@@ -650,7 +651,6 @@ class TIModel(MassBalanceModel):
     def __init__(self, gdir, melt_f, residual=0,
                  mb_type='mb_daily', N=100, loop=False,
                  grad_type='cte', filename='climate_historical',
-                 input_filesuffix='',
                  repeat=False, ys=None, ye=None,
                  t_solid=0, t_liq=2, t_melt=0, prcp_fac=2.5,
                  default_grad=-0.0065,
@@ -658,7 +658,8 @@ class TIModel(MassBalanceModel):
                  # check_climate=True,
                  SEC_IN_YEAR=SEC_IN_YEAR,
                  SEC_IN_MONTH=SEC_IN_MONTH,
-                 SEC_IN_DAY=SEC_IN_DAY
+                 SEC_IN_DAY=SEC_IN_DAY,
+                 baseline_climate=None,
                  ):
         """ Initialize.
         Parameters
@@ -781,33 +782,43 @@ class TIModel(MassBalanceModel):
         self.SEC_IN_YEAR = SEC_IN_YEAR
         self.SEC_IN_MONTH = SEC_IN_MONTH
         self.SEC_IN_DAY = SEC_IN_DAY
+        # what is this???
+        self.valid_bounds = [-1e4, 2e4]  # in m
+
 
         # check if the right climate is used for the right mb_type
         # these checks might be changed if there are more climate datasets
         # available!!!
         # only have daily temperatures for 'ERA5_daily'
-        baseline_climate = gdir.get_climate_info()['baseline_climate_source']
-        if (self.mb_type == 'mb_real_daily' and
-            (baseline_climate != 'ERA5_daily' and
-             baseline_climate != 'WFDE5_daily_cru')):
-            text = ('wrong climate for mb_real_daily, need to do e.g. '
-                    'process_era5_daily_data(gd) to enable ERA5_daily'
-                    'or process_wfde5_data(gd) for WFDE5_daily_cru')
-            raise InvalidParamsError(text)
+        if baseline_climate == None:
+            baseline_climate = gdir.get_climate_info()['baseline_climate_source']
+
+        if mb_type != 'mb_real_daily':
+            # cfg.PARAMS['baseline_climate'] = 'ERA5dr'
+            input_filesuffix = '_monthly_{}'.format(baseline_climate)
+        else:
+            # this is just the climate "type"
+            # cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
+            input_filesuffix = '_daily_{}'.format(baseline_climate)
+
+        self._input_filesuffix = input_filesuffix
+        #if (self.mb_type == 'mb_real_daily' and
+        #    (baseline_climate != 'ERA5dr' and
+         #    baseline_climate != 'WFDE5_CRU')):
+         #   text = ('wrong climate for mb_real_daily, need to do e.g. '
+        #            'process_era5_daily_data(gd) to produce daily_ERA5dr'
+        #            'or process_wfde5_data(gd) for daily_WFDE5_CRU')
+        #    raise InvalidParamsError(text)
         # mb_monthly does not work when daily temperatures are used
-        if self.mb_type == 'mb_monthly' and baseline_climate == 'ERA5_daily':
+        if self.mb_type == 'mb_monthly' and input_filesuffix == 'daily_ERA5dr':
             text = ('wrong climate for mb_monthly, need to do e.g.'
                     'oggm.shop.ecmwf.process_ecmwf_data(gd, dataset="ERA5dr")')
             raise InvalidParamsError(text)
         # mb_daily needs temp_std
-        if self.mb_type == 'mb_daily' and baseline_climate == 'ERA5_daily':
+        if self.mb_type == 'mb_daily' and input_filesuffix == 'daily_ERA5dr':
             text = 'wrong climate for mb_daily, need to do e.g. \
             oggm.shop.ecmwf.process_ecmwf_data(gd, dataset = "ERA5dr")'
             raise InvalidParamsError(text)
-
-        if (baseline_climate == 'ERA5_daily' or
-            baseline_climate == 'WFDE5_daily_cru'):
-            input_filesuffix = '_daily'
 
         # Read climate file
         fpath = gdir.get_filepath(filename, filesuffix=input_filesuffix)
@@ -1051,8 +1062,7 @@ class TIModel(MassBalanceModel):
         itemp = self.temp
         temp_m = self.t_melt
         temp_s = (self.t_liq + self.t_solid) / 2
-        if (cfg.PARAMS['baseline_climate'] == 'ERA5_daily' or
-            cfg.PARAMS['baseline_climate'] == 'WFDE5_daily_cru'):
+        if ('daily' in self._input_filesuffix):
             # different amount of days per year ...
             d_m = 30
             pass
@@ -1478,7 +1488,8 @@ class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
 
     def __init__(self, gdir, fls=None, melt_f=None, prcp_fac=None,
                  mb_model_class=TIModel, use_inversion_flowlines=False,
-                 input_filesuffix='', bias=None, **kwargs):
+                 input_filesuffix='', bias=0,
+                 **kwargs):
         """Initialize.
 
         Parameters
@@ -1553,14 +1564,14 @@ class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
             if (issubclass(mb_model_class, TIModel)):
                 self.flowline_mb_models.append(
                     mb_model_class(gdir, melt_f, prcp_fac = prcp_fac,
-                                   residual=fl_bias,
-                                   input_filesuffix=rgi_filesuffix, **kwargs))
+                                   residual=fl_bias, baseline_climate=rgi_filesuffix,
+                                    **kwargs))
             else:
                 self.flowline_mb_models.append(
                     mb_model_class(gdir, mu_star=fl.mu_star, bias=fl_bias,
                                    input_filesuffix=rgi_filesuffix, **kwargs))
 
-        # self.valid_bounds = self.flowline_mb_models[-1].valid_bounds
+        self.valid_bounds = self.flowline_mb_models[-1].valid_bounds
         self.hemisphere = gdir.hemisphere
 
     @property
@@ -1689,3 +1700,319 @@ class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
             areas = np.append(areas, np.sum(fl.widths))
 
         return np.average(elas, weights=areas)
+
+
+@entity_task(log)
+def fixed_geometry_mass_balance_TIModel(gdir, ys=None, ye=None, years=None,
+                                monthly_step=False,
+                                use_inversion_flowlines=True,
+                                climate_filename='climate_historical',
+                                climate_input_filesuffix='',
+                                ds_gcm = None,
+                                **kwargs):
+    """Computes the mass-balance with climate input from e.g. CRU or a GCM.
+
+    Parameters
+    ----------
+    gdir : :py:class:`oggm.GlacierDirectory`
+        the glacier directory to process
+    ys : int
+        start year of the model run (default: from the climate file)
+        date)
+    ye : int
+        end year of the model run (default: from the climate file)
+    years : array of ints
+        override ys and ye with the years of your choice
+    monthly_step : bool
+        whether to store the diagnostic data at a monthly time step or not
+        (default is yearly)
+    use_inversion_flowlines : bool
+        whether to use the inversion flowlines or the model flowlines
+    climate_filename : str
+        name of the climate file, e.g. 'climate_historical' (default) or
+        'gcm_data'
+    climate_input_filesuffix: str
+        filesuffix for the input climate file
+    **kwargs:
+        added to MultipleFlowlineMassBalance_TIModel
+    """
+
+    if monthly_step:
+        raise NotImplementedError('monthly_step not implemented yet')
+    if ds_gcm != None:
+        melt_f = ds_gcm.sel(rgi_id=gdir.rgi_id).melt_f.values
+        pf = ds_gcm.sel(rgi_id=gdir.rgi_id).pf.values
+
+        mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=TIModel,
+                                                 filename=climate_filename,
+                                                 use_inversion_flowlines=use_inversion_flowlines,
+                                                 input_filesuffix=climate_input_filesuffix,
+                                                 melt_f=melt_f, prcp_fac=pf,
+                                                 **kwargs)
+    else:
+        mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=TIModel,
+                                     filename=climate_filename,
+                                     use_inversion_flowlines=use_inversion_flowlines,
+                                     input_filesuffix=climate_input_filesuffix,
+                                     **kwargs)
+
+    if years is None:
+        if ys is None:
+            ys = mb.flowline_mb_models[0].ys
+        if ye is None:
+            ye = mb.flowline_mb_models[0].ye
+        years = np.arange(ys, ye + 1)
+
+
+    odf = pd.Series(data=mb.get_specific_mb(year=years),
+                    index=years)
+    return odf
+
+
+from oggm.utils._workflow import global_task
+@global_task(log)
+def compile_fixed_geometry_mass_balance_TIModel(gdirs, filesuffix='',
+                                        path=True, csv=False,
+                                        use_inversion_flowlines=True,
+                                        ys=None, ye=None, years=None,
+                                        ds_gcm=None,
+                                        **kwargs):
+    """Compiles a table of specific mass-balance timeseries for all glaciers.
+
+    The file is stored in a hdf file (not csv) per default. Use pd.read_hdf
+    to open it.
+
+    Parameters
+    ----------
+    gdirs : list of :py:class:`oggm.GlacierDirectory` objects
+        the glacier directories to process
+    filesuffix : str
+        add suffix to output file
+    path : str, bool
+        Set to "True" in order  to store the info in the working directory
+        Set to a path to store the file to your chosen location (file
+        extension matters)
+    csv: bool
+        Set to store the data in csv instead of hdf.
+    use_inversion_flowlines : bool
+        whether to use the inversion flowlines or the model flowlines
+    ys : int
+        start year of the model run (default: from the climate file)
+        date)
+    ye : int
+        end year of the model run (default: from the climate file)
+    years : array of ints
+        override ys and ye with the years of your choice
+    """
+    from oggm.workflow import execute_entity_task
+    #from oggm.core.massbalance import fixed_geometry_mass_balance
+
+    out_df = execute_entity_task(fixed_geometry_mass_balance_TIModel, gdirs,
+                                 use_inversion_flowlines=use_inversion_flowlines,
+                                 ys=ys, ye=ye, years=years,
+                                 ds_gcm=ds_gcm, **kwargs)
+
+    for idx, s in enumerate(out_df):
+        if s is None:
+            out_df[idx] = pd.Series(np.NaN)
+
+    out = pd.concat(out_df, axis=1, keys=[gd.rgi_id for gd in gdirs])
+    out = out.dropna(axis=0, how='all')
+
+    if path:
+        if path is True:
+            fpath = os.path.join(cfg.PATHS['working_dir'],
+                                 'fixed_geometry_mass_balance' + filesuffix)
+            if csv:
+                out.to_csv(fpath + '.csv')
+            else:
+                out.to_hdf(fpath + '.hdf', key='df')
+        else:
+            ext = os.path.splitext(path)[-1]
+            if ext.lower() == '.csv':
+                out.to_csv(path)
+            elif ext.lower() == '.hdf':
+                out.to_hdf(path, key='df')
+    return out
+
+
+def extend_past_climate_run_TIModel(past_run_file=None,
+                            fixed_geometry_mb_file=None,
+                            glacier_statistics_file=None,
+                            path=False,
+                            use_compression=True):
+    """Utility function to extend past MB runs prior to the RGI date.
+
+    We use a fixed geometry (and a fixed calving rate) for all dates prior
+    to the RGI date.
+
+    This is not parallelized, i.e a bit slow.
+
+    Parameters
+    ----------
+    past_run_file : str
+        path to the historical run (nc)
+    fixed_geometry_mb_file : str
+        path to the MB file (csv)
+    glacier_statistics_file : str
+        path to the glacier stats file (csv)
+    path : str
+        where to store the file
+    use_compression : bool
+
+    Returns
+    -------
+    the extended dataset
+    """
+
+    log.workflow('Applying extend_past_climate_run on '
+                 '{}'.format(past_run_file))
+
+    fixed_geometry_mb_df = pd.read_csv(fixed_geometry_mb_file, index_col=0,
+                                       low_memory=False)
+    stats_df = pd.read_csv(glacier_statistics_file, index_col=0,
+                           low_memory=False)
+
+    with xr.open_dataset(past_run_file) as past_ds:
+
+        # We need at least area and vol to do something
+        if 'volume' not in past_ds.data_vars or 'area' not in past_ds.data_vars:
+            raise InvalidWorkflowError('Need both volume and area to proceed')
+
+        y0_run = int(past_ds.time[0])
+        y1_run = int(past_ds.time[-1])
+        if (y1_run - y0_run + 1) != len(past_ds.time):
+            raise NotImplementedError('Currently only supports annual outputs')
+        y0_clim = int(fixed_geometry_mb_df.index[0])
+        y1_clim = int(fixed_geometry_mb_df.index[-1])
+        if y0_clim > y0_run or y1_clim < y0_run:
+            raise InvalidWorkflowError('Dates do not match.')
+        if y1_clim != y1_run - 1:
+            raise InvalidWorkflowError('Dates do not match.')
+        if len(past_ds.rgi_id) != len(fixed_geometry_mb_df.columns):
+            raise InvalidWorkflowError('Nb of glaciers do not match.')
+        if len(past_ds.rgi_id) != len(stats_df.index):
+            raise InvalidWorkflowError('Nb of glaciers do not match.')
+
+        # Make sure we agree on order
+        df = fixed_geometry_mb_df[past_ds.rgi_id]
+
+        # Output data
+        years = np.arange(y0_clim, y1_run+1)
+        ods = past_ds.reindex({'time': years})
+
+        # Time
+        ods['hydro_year'].data[:] = years
+        ods['hydro_month'].data[:] = ods['hydro_month'][-1]
+        if ods['hydro_month'][-1] == 1:
+            ods['calendar_year'].data[:] = years
+        else:
+            ods['calendar_year'].data[:] = years - 1
+        ods['calendar_month'].data[:] = ods['calendar_month'][-1]
+        for vn in ['hydro_year', 'hydro_month',
+                   'calendar_year', 'calendar_month']:
+            ods[vn] = ods[vn].astype(int)
+
+        # New vars
+        for vn in ['volume', 'volume_bsl', 'volume_bwl',
+                   'area', 'length', 'calving', 'calving_rate']:
+            if vn in ods.data_vars:
+                ods[vn + '_ext'] = ods[vn].copy(deep=True)
+                ods[vn + '_ext'].attrs['description'] += ' (extended with MB data)'
+
+        vn = 'volume_fixed_geom_ext'
+        ods[vn] = ods['volume'].copy(deep=True)
+        ods[vn].attrs['description'] += ' (replaced with fixed geom data)'
+
+        rho = cfg.PARAMS['ice_density']
+        # Loop over the ids
+        for i, rid in enumerate(ods.rgi_id.data):
+            # Both do not need to be same length but they need to start same
+            mb_ts = df.values[:, i]
+            orig_vol_ts = ods.volume_ext.data[:, i]
+            if not (np.isfinite(mb_ts[-1]) and np.isfinite(orig_vol_ts[-1])):
+                # Not a valid glacier
+                continue
+            if np.isfinite(orig_vol_ts[0]):
+                # Nothing to extend, really
+                continue
+
+            # First valid id
+            fid = np.argmax(np.isfinite(orig_vol_ts))
+
+            # Add calving to the mix
+            try:
+                calv_flux = stats_df.loc[rid, 'calving_flux'] * 1e9
+                calv_rate = stats_df.loc[rid, 'calving_rate_myr']
+            except KeyError:
+                calv_flux = 0
+                calv_rate = 0
+            if not np.isfinite(calv_flux):
+                calv_flux = 0
+            if not np.isfinite(calv_rate):
+                calv_rate = 0
+
+            # Fill area and length which stays constant before date
+            orig_area_ts = ods.area_ext.data[:, i]
+            orig_area_ts[:fid] = orig_area_ts[fid]
+
+            # We convert SMB to volume
+            mb_vol_ts = (mb_ts / rho * orig_area_ts[fid] - calv_flux).cumsum()
+            calv_ts = (mb_ts * 0 + calv_flux).cumsum()
+
+            # The -1 is because the volume change is known at end of year
+            mb_vol_ts = mb_vol_ts + orig_vol_ts[fid] - mb_vol_ts[fid-1]
+
+            # Now back to netcdf
+            ods.volume_fixed_geom_ext.data[1:, i] = mb_vol_ts
+            ods.volume_ext.data[1:fid, i] = mb_vol_ts[0:fid-1]
+            ods.area_ext.data[:, i] = orig_area_ts
+
+            # Optional variables
+            if 'length' in ods.data_vars:
+                orig_length_ts = ods.length_ext.data[:, i]
+                orig_length_ts[:fid] = orig_length_ts[fid]
+                ods.length_ext.data[:, i] = orig_length_ts
+
+            if 'calving' in ods.data_vars:
+                orig_calv_ts = ods.calving_ext.data[:, i]
+                # The -1 is because the volume change is known at end of year
+                calv_ts = calv_ts + orig_calv_ts[fid] - calv_ts[fid-1]
+                ods.calving_ext.data[1:fid, i] = calv_ts[0:fid-1]
+
+            if 'calving_rate' in ods.data_vars:
+                orig_calv_rate_ts = ods.calving_rate_ext.data[:, i]
+                # +1 because calving rate at year 0 is unkown from the dyns model
+                orig_calv_rate_ts[:fid+1] = calv_rate
+                ods.calving_rate_ext.data[:, i] = orig_calv_rate_ts
+
+            # Extend vol bsl by assuming that % stays constant
+            if 'volume_bsl' in ods.data_vars:
+                bsl = ods.volume_bsl.data[fid, i] / ods.volume.data[fid, i]
+                ods.volume_bsl_ext.data[:fid, i] = bsl * ods.volume_ext.data[:fid, i]
+            if 'volume_bwl' in ods.data_vars:
+                bwl = ods.volume_bwl.data[fid, i] / ods.volume.data[fid, i]
+                ods.volume_bwl_ext.data[:fid, i] = bwl * ods.volume_ext.data[:fid, i]
+
+        # Remove old vars
+        for vn in list(ods.data_vars):
+            if '_ext' not in vn and 'time' in ods[vn].dims:
+                del ods[vn]
+
+        # Rename vars to their old names
+        ods = ods.rename(dict((o, o.replace('_ext', ''))
+                              for o in ods.data_vars))
+
+        # Remove t0 (which is NaN)
+        ods = ods.isel(time=slice(1, None))
+
+        # To file?
+        if path:
+            enc_var = {'dtype': 'float32'}
+            if use_compression:
+                enc_var['complevel'] = 5
+                enc_var['zlib'] = True
+            encoding = {v: enc_var for v in ods.data_vars}
+            ods.to_netcdf(path, encoding=encoding)
+
+    return ods

@@ -36,7 +36,7 @@ from MBsandbox.mbmod_daily_oneflowline import process_era5_daily_data, TIModel, 
 from MBsandbox.help_func import compute_stat, minimize_bias, \
     optimize_std_quot_brentq
 
-from help_func_geodetic import minimize_bias_geodetic, \
+from MBsandbox.wip.help_func_geodetic import minimize_bias_geodetic, \
     optimize_std_quot_brentq_geod, get_opt_pf_melt_f
 
 import theano
@@ -144,7 +144,8 @@ def bayes_dummy_model_better(uniform,
                              nosigma=False, model=None, pd_calib_opt=None,
                              first_ppc=True, predict_historic=True,
                              first_ppc_200=False, random_seed=42,
-                             pd_geodetic_comp=None):
+                             cores=4,
+                             pd_geodetic_comp=None, y0=None, y1=None):
     if use_two_msm:
         slope_pfs = []
         slope_melt_fs = []
@@ -250,12 +251,12 @@ def bayes_dummy_model_better(uniform,
         #    geodetic_massbal < max_allowed_specificMB, -np.inf, 0))
 
         # also compute this difference just to be sure ...
-        prior = pm.sample_prior_predictive(random_seed=random_seed,
+        prior = pm.sample_prior_predictive(random_seed=random_seed, #cores=cores,
                                            samples=1000)  # , keep_size = True)
     with model_T:
         if sampler == 'nuts':
-            trace = pm.sample(10000, chains=3, tune=10000, target_accept=0.999,
-                              compute_convergence_checks=True,
+            trace = pm.sample(20000, chains=3, tune=20000, target_accept=0.999,
+                              compute_convergence_checks=True, cores=cores,
                               return_inferencedata=True)
             # increased target_accept because of divergences ...
         #                 #start={'pf':2.5, 'melt_f': 200})
@@ -266,8 +267,12 @@ def bayes_dummy_model_better(uniform,
                                                         target_accept=0.98)  # , compute_convergence_checks= True)
 
     with model_T:
-        burned_trace = trace.sel(draw=slice(2000, ))
-
+        burned_trace = trace.sel(draw=slice(5000, None))
+        burned_trace.posterior['draw'] = np.arange(0, len(burned_trace.posterior.draw))
+        burned_trace.log_likelihood['draw'] = np.arange(0, len(burned_trace.posterior.draw))
+        burned_trace.sample_stats['draw']  = np.arange(0, len(burned_trace.posterior.draw))
+        
+        
         # trace = pm.sample(10000, chains=4, tune=10000, target_accept = 0.98)
         # need high target_accept to have no divergences, effective sample number
         #  and # We have stored the paths of all our variables, or "traces", in the trace variable.,
@@ -281,7 +286,7 @@ def bayes_dummy_model_better(uniform,
         if first_ppc:
             # TODO: then sometimes a problem occurs that a warning is raised
             #  about more chains (1000) than draws (2) ... why ???
-            ppc = pm.sample_posterior_predictive(burned_trace,
+            ppc = pm.sample_posterior_predictive(burned_trace, #cores=cores,
                                                  random_seed=random_seed,
                                                  var_names=['geodetic_massbal',
                                                             'pf', 'melt_f',
@@ -292,7 +297,7 @@ def bayes_dummy_model_better(uniform,
                       az.from_dict(posterior_predictive=ppc, prior=prior),
                       inplace=True)
         if first_ppc_200:
-            ppc = pm.sample_posterior_predictive(burned_trace,
+            ppc = pm.sample_posterior_predictive(burned_trace, #=cores,
                                                  samples=200,
                                                  random_seed=random_seed,
                                                  var_names=['geodetic_massbal',
@@ -307,9 +312,9 @@ def bayes_dummy_model_better(uniform,
     #
     if predict_historic:
         try:
-            ys_ref = gd.get_ref_mb_data().index.values
+            ys_ref = gd.get_ref_mb_data(y0=y0, y1=y1).index.values
         except:
-            ys_ref = np.arange(1980, 2019, 1)
+            ys_ref = np.arange(1979, 2019, 1)
         with model_T:
             slope_pf_new = []
             slope_melt_f_new = []
@@ -322,7 +327,7 @@ def bayes_dummy_model_better(uniform,
                                   'aet_slope_pfs': slope_pf_new,
                                   'observed': np.empty(len(ys_ref)),
                                   'sigma': np.empty(len(ys_ref))})
-            ppc_new = pm.sample_posterior_predictive(burned_trace,
+            ppc_new = pm.sample_posterior_predictive(burned_trace, #cores=cores,
                                                      random_seed=random_seed,
                                                      var_names=[
                                                          'geodetic_massbal',
@@ -343,7 +348,7 @@ def bayes_dummy_model_better_OLD(uniform,
                                  gd_mb=None, h=None, w=None, use_two_msm=True,
                                  nosigma=False, model=None, pd_calib_opt=None,
                                  first_ppc=True, pd_geodetic_comp=None,
-                                 random_seed=42):
+                                 random_seed=42, y0=None, y1=None):
     if use_two_msm:
         slope_pfs = []
         slope_melt_fs = []
@@ -464,7 +469,7 @@ def bayes_dummy_model_better_OLD(uniform,
                                                         target_accept=0.98)  # , compute_convergence_checks= True)
 
     with model_T:
-        burned_trace = trace.sel(draw=slice(5000, ))
+        burned_trace = trace.sel(draw=slice(5000, None))
 
         # trace = pm.sample(10000, chains=4, tune=10000, target_accept = 0.98)
         # need high target_accept to have no divergences, effective sample number
@@ -490,7 +495,7 @@ def bayes_dummy_model_better_OLD(uniform,
                       az.from_dict(posterior_predictive=ppc, prior=prior),
                       inplace=True)
 
-    ys_ref = gd.get_ref_mb_data().index.values
+    ys_ref = gd.get_ref_mb_data(y0=y0, y1=y1).index.values
     with model_T:
         slope_pf_new = []
         slope_melt_f_new = []
@@ -521,7 +526,8 @@ def bayes_dummy_model_ref_std(uniform,
                               h=None, w=None, use_two_msm=True, nosigma=False,
                               nosigmastd=False, first_ppc=True,
                               pd_calib_opt=None,
-                              pd_geodetic_comp=None, random_seed=42):
+                              pd_geodetic_comp=None, random_seed=42,
+                              y0=None, y1=None):
     # test
     slope_pfs = []
     slope_melt_fs = []
@@ -611,10 +617,6 @@ def bayes_dummy_model_ref_std(uniform,
                                                       observed=observed,
                                                       lower=max_allowed_specificMB)
             else:
-                geodetic_massbal = pm.Normal('geodetic_massbal',
-                                             mu=mb_mod,
-                                             observed=observed)  # likelihood
-
                 geodetic_massbal = pm.TruncatedNormal('geodetic_massbal',
                                                       mu=mb_mod,
                                                       observed=observed,
@@ -630,7 +632,7 @@ def bayes_dummy_model_ref_std(uniform,
 
         # std
         # sigma = pm.Data('sigma', 100) # how large are the uncertainties of the direct glaciological method !!!
-        ref_df = gd.get_ref_mb_data()
+        ref_df = gd.get_ref_mb_data(y0=y0, y1=y1)
         sigma_std = aet.constant((ref_df[
                                       'ANNUAL_BALANCE'].values / 10).std())  # how large are the uncertainties of the direct glaciological method !!!
         observed_std = aet.constant(ref_df['ANNUAL_BALANCE'].values.std())
@@ -657,7 +659,7 @@ def bayes_dummy_model_ref_std(uniform,
     with model_T:
         # sampling
         if sampler == 'nuts':
-            trace = pm.sample(10000, chains=4, tune=10000, target_accept=0.98,
+            trace = pm.sample(25000, chains=3, tune=25000, target_accept=0.99,
                               compute_convergence_checks=True,
                               return_inferencedata=True)
         #                 #start={'pf':2.5, 'melt_f': 200})
@@ -667,7 +669,11 @@ def bayes_dummy_model_ref_std(uniform,
                                                         tune=20000,
                                                         target_accept=0.98)  # , compute_convergence_checks= True)
 
-        burned_trace = trace.sel(draw=slice(5000, ))
+        burned_trace = trace.sel(draw=slice(5000, None))
+        burned_trace.posterior['draw'] = np.arange(0, len(burned_trace.posterior.draw))
+        burned_trace.log_likelihood['draw'] = np.arange(0, len(burned_trace.posterior.draw))
+        burned_trace.sample_stats['draw']  = np.arange(0, len(burned_trace.posterior.draw))
+        
         if first_ppc:
             print(az.summary(burned_trace.posterior))
             ppc = pm.sample_posterior_predictive(burned_trace,
@@ -709,7 +715,7 @@ def bayes_dummy_model_ref(uniform,
                           sampler='nuts',
                           ys=None, gd_mb=None, h=None, w=None, use_two_msm=True,
                           nosigma=False, pd_calib_opt=None,
-                          random_seed=42):
+                          random_seed=4, y0=None, y1=None):
     # if use_two_msm:
     slope_pfs = []
     slope_melt_fs = []
@@ -741,7 +747,7 @@ def bayes_dummy_model_ref(uniform,
         aet_mbs = aet_slope_pfs * pf + aet_slope_melt_fs * melt_f
         mb_mod = pm.Deterministic('mb_mod', aet_mbs)
     with model_T:
-        ref_df = gd.get_ref_mb_data()
+        ref_df = gd.get_ref_mb_data(y0=y0, y1=y1)
         # sigma = pm.Data('sigma', 100) # how large are the uncertainties of the direct glaciological method !!!
         sigma = pm.Data('sigma',
                         100)  # np.abs(ref_df['ANNUAL_BALANCE'].values/10)) # how large are the uncertainties of the direct glaciological method !!!
@@ -774,7 +780,7 @@ def bayes_dummy_model_ref(uniform,
                                                         target_accept=0.98)  # , compute_convergence_checks= True)
 
     with model_T:
-        burned_trace = trace.sel(draw=slice(5000, ))
+        burned_trace = trace.sel(draw=slice(5000, None))
         az.summary(burned_trace.posterior)
         ppc = pm.sample_posterior_predictive(burned_trace,
                                              random_seed=random_seed,
