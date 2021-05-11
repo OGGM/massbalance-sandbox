@@ -44,7 +44,7 @@ def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
     absolute_bias : bool
         if absolute_bias == True, the absolute value of the bias is returned.
         if optimisation is done with Powell need absolute bias.
-        If optimisation is done with Brentq, absolute_bias has to set False
+        If optimisation is done with Brentq, absolute_bias has to be set False
         The default is False.
     ys: np.array
         years for which specific mass balance is computed
@@ -120,26 +120,30 @@ def get_opt_pf_melt_f(gd, mb_type='mb_monthly', grad_type='cte',
         pd_calib_opt.loc[gd.rgi_id] = np.NaN
     if mb_type != 'mb_real_daily':
         if dataset == 'ERA5':
-            cfg.PARAMS['baseline_climate'] = 'ERA5dr'
+            baseline_climate = 'ERA5dr'
             oggm.shop.ecmwf.process_ecmwf_data(gd, dataset='ERA5dr')
+            input_fs = ''
+
         elif dataset == 'WFDE5_monthly_cru':
-            cfg.PARAMS['baseline_climate'] = 'WFDE5_monthly_cru'
+            baseline_climate = 'WFDE5_CRU'
             process_wfde5_data(gd, temporal_resol='monthly')
+            input_fs = '_monthly_WFDE5_CRU'
     elif mb_type == 'mb_real_daily':
         if dataset == 'ERA5':
-            cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
+            baseline_climate = 'ERA5dr'
             process_era5_daily_data(gd)
+            input_fs = ''
         elif dataset == 'WFDE5_monthly_cru':
-            cfg.PARAMS[
-                'baseline_climate'] = 'ERA5_daily'  # BUG 'WFDE5_daily_cru'
+            baseline_climate = 'WFDE5_CRU'
             process_wfde5_data(gd, temporal_resol='daily')
+            input_fs = '_daily_WFDE5_CRU'
 
-    mbdf = gd.get_ref_mb_data()
+    mbdf = gd.get_ref_mb_data(input_filesuffix=input_fs)
     mb_glaciological = mbdf['ANNUAL_BALANCE']
     ys_glac = mbdf.index.values
     # print(ys_glac)
     gd_mb = TIModel(gd, None, mb_type=mb_type, N=100, prcp_fac=2.5,
-                    grad_type=grad_type)
+                    grad_type=grad_type, baseline_climate=baseline_climate)
     gd_mb.historical_climate_qc_mod(gd)
 
     h, w = gd.get_inversion_flowline_hw()

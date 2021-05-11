@@ -144,7 +144,7 @@ def bayes_dummy_model_better(uniform,
                              nosigma=False, model=None, pd_calib_opt=None,
                              first_ppc=True, predict_historic=True,
                              first_ppc_200=False, random_seed=42,
-                             cores =4,
+                             cores=4,
                              pd_geodetic_comp=None, y0=None, y1=None):
     if use_two_msm:
         slope_pfs = []
