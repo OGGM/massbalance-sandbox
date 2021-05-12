@@ -21,7 +21,8 @@ from MBsandbox.help_func import (compute_stat, minimize_bias,
 
 def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
                            h=None, w=None, pf=2.5,
-                           absolute_bias=False, ys=np.arange(2000, 2019, 1)):
+                           absolute_bias=False, ys=np.arange(2000, 2019, 1),
+                           oggm_default_mb = False):
     """ calibrates the melt factor (melt_f) by getting the bias to zero
     comparing modelled mean specific mass balance between 2000 and 2020 to
     observed geodetic data
@@ -49,7 +50,7 @@ def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
     ys: np.array
         years for which specific mass balance is computed
         default is 2000--2018
-        TODO: change this to to 2000-2019 to match better
+        TODO: change this to 2000-2019 to match better
               geodetic msm
 
     Returns
@@ -59,7 +60,11 @@ def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
         if absolute_bias = True:  np.abs(bias) is returned
 
     """
-    gd_mb.melt_f = x
+    if oggm_default_mb:
+        gd_mb.mu_star = x
+    else:
+        gd_mb.melt_f = x
+
     gd_mb.prcp_fac = pf
     mb_specific = gd_mb.get_specific_mb(heights=h,
                                         widths=w,
