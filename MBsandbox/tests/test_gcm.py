@@ -246,8 +246,8 @@ class TestProcessIsimipData:
                                        sgcm.prcp.mean(),
                                        rtol=1e-3)
 
-            # Here no std dev!
-            # do not look at the lapse rate gradient here, because this is set constant
+            # Here no std dev of temperatuer
+            # we also do not look at the lapse rate gradient here, because this is set constant
             # for gcms (for clim it varies, but when using 'var_an_cycle', only the mean
             # annual lapse rate cycle is applied anyway
             _sclim = sclim.groupby('time.dayofyear').std(dim='time')
