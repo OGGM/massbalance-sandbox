@@ -515,15 +515,11 @@ def process_gcm_data_adv_daily(gdir, output_filesuffix='', prcp=None,
                                time_unit=None, calendar=None, source='',
                                climate_historical_filesuffix='',
                                correct=True):
-    """ TODO: adapt ...Applies the anomaly method to GCM climate data
+    """ Applies the anomaly method to daily GCM climate data
 
     This function can be applied to any GCM data, if it is provided in a
-    suitable :py:class:`xarray.DataArray`. See Parameter description for
+    suitable :py:class:`xarray.DataArray` daily format. See Parameter description for
     format details.
-
-    For CESM-LME a specific function :py:func:`tasks.process_cesm_data` is
-    available which does the preprocessing of the data and subsequently calls
-    this function.
 
     Parameters
     ----------
@@ -533,20 +529,21 @@ def process_gcm_data_adv_daily(gdir, output_filesuffix='', prcp=None,
         append a suffix to the output gcm
         filename (useful for ensemble experiments).
     prcp : :py:class:`xarray.DataArray`
-        | monthly total precipitation [mm month-1]
+        | daily total precipitation [mm day-1]
         | Coordinates:
         | lat float64
         | lon float64
         | time: cftime object
     temp : :py:class:`xarray.DataArray`
-        | monthly temperature [K]
+        | daily mean temperature [K]
         | Coordinates:
         | lat float64
         | lon float64
         | time cftime object
     year_range : tuple of str
         the year range for which you want to compute the anomalies. Default
-        is `('1961', '1990')`
+        is `('1979', '2014')` because this is the common period between historical
+        with WFDE5 and because ssp-dependence starts in 2015
     scale_stddev : bool
         whether or not to scale the temperature standard deviation as well
     time_unit : str
@@ -563,7 +560,7 @@ def process_gcm_data_adv_daily(gdir, output_filesuffix='', prcp=None,
         apply the anomaly method
     """
 
-    # Standard sanity checks
+    # Standard sanity checks that this is really daily
     months = temp['time.month']
     if months[0] != 1:
         raise ValueError('We expect the files to start in January!')
@@ -599,35 +596,37 @@ def process_gcm_data_adv_daily(gdir, output_filesuffix='', prcp=None,
                               filesuffix=climate_historical_filesuffix)
     ds_climobs = xr.open_dataset(fpath, use_cftime=True)
 
-    # Add climobs
+    # select the time range where from where we want to apply the anomaly correction
+    # dsclimobs: historical climate dataset
     dsclimobs = ds_climobs.sel(time=slice(*year_range))
 
     # compute daily anomalies
     # of temp
     if correct:
         if scale_stddev:
-            # This is a bit more arithmetic
+            # scale the temperature standard deviation
+            # that means historic gcm should have equal std as the climate dataset
+
+            # select the time range where from where we want to apply the anomaly correction
             ts_tmp_sel = temp.sel(time=slice(*year_range))
-            # check if number of days are equal in dsclimobs and ts_tmp_sel
-            # noda with .groupby('time.year').count().tasAdjust
+            # get annual cycle standard deviation of temperature
+            # from GCM over same time period
             ts_tmp_std = ts_tmp_sel.groupby('time.dayofyear').std(dim='time')
-            # get phi_daily (see Zekollari 2019, eq. 2)
+
+            # get the std factor (observed_reanalysis / gcm ) for same time period
+            # corresponds to phi_daily in Zekollari (2019, eq. 2)
             std_fac = dsclimobs.temp.groupby('time.dayofyear').std(
                 dim='time') / ts_tmp_std
-            # what should I do here????
             # this needs to be adapted if sm!=1
-            # std_fac = std_fac.roll(month=13 - sm, roll_coords=True)
 
-            ############to redo with a loop !!! #############
-            # TODO: use ts_tmp_sel.groupby('time.year').count().tasAdjust
-            # to get number of days for each year
-            # amount of years: before: len(temp) // 12
-            aoy = len(temp.groupby('time.year').mean())
-            # std_fac = np.tile(std_fac.data, aoy)
+            # Trial to incorporate OLD METHOD of Fabien process_gcm_data to daily
+            # but actually I decided that it gets too complicated ...
+            # amount of years
+            # aoy = len(temp.groupby('time.year').mean())
             # We need an even number of years for this to work
-            if ((len(ts_tmp_sel.groupby('time.year').mean())) % 2) == 1:
-                raise InvalidParamsError('We need an even number of years '
-                                         'for this to work')
+            # if ((len(ts_tmp_sel.groupby('time.year').mean())) % 2) == 1:
+            #    raise InvalidParamsError('We need an even number of years '
+            #                             'for this to work')
             # win_size = len(ts_tmp_sel) + 1
             # for y in temp.groupby('time.year').time.mean():
             #    xm + (x[:, n])
@@ -642,27 +641,36 @@ def process_gcm_data_adv_daily(gdir, output_filesuffix='', prcp=None,
             # temp = temp.rolling(time=win_size, center=True,
             #                    min_periods=1).reduce(roll_func)
 
-            # a little bit slower but more comprehensible
-            # temp_test = temp.copy()
+            # a little bit slower with the loop but more comprehensible
+            # amount of years for the selected time period
             aoy_sel = len(ts_tmp_sel.groupby('time.year').mean())
             for doy in np.arange(0, 366):
-                # at the first / last years less observation over which mean is
-                # made but I guess this does not matter (otherwise it would be nan)
+                # repeat this for each day of the year
+                # T_d,y,corrected = mean(T$_{d,36}$) + (T_${d,y}$ - mean (T$_{d,36}$)) *std_fac_d
+                # we don't mind about lap years ...
+                # select all temp. values for this day (+1 because we start doy with 0)
+                # corresponds to T_${d,y}$:
                 x = temp[temp.time.dt.dayofyear == doy + 1].copy()
+                # do the moving average with the amount of years that were selected
+                # corresponds to mean(T$_{d,36}$)
                 xm = x.rolling(time=aoy_sel, center=True, min_periods=1).mean()
-                # same as in Zekollari 2019, eq. 2, but mean over aoy_sel years
-                # instead
-                temp[temp.time.dt.dayofyear == doy + 1] = xm + (x - xm) * \
-                                                          std_fac[doy]
+                # due to rolling: at first / last years less observation over which mean is
+                # made but I guess this does not matter (otherwise it would be nan)
 
-            #####################################################
+                # next line is exactly the same as in Zekollari 2019, eq. 2,
+                # but mean over aoy_sel years instead
+                # overwrite the temperature value (get T_d,y,corrected)
+                temp[temp.time.dt.dayofyear == doy + 1] = xm + (x - xm) * std_fac[doy]
 
+        # here we additionally correct to match the mean values
+        # first get scaled anomalies of temperature
         ts_tmp_sel = temp.sel(time=slice(*year_range))
         assert len(temp.sel(time=slice(*year_range)).time) == len(
             dsclimobs.time)
         ts_tmp_avg = ts_tmp_sel.groupby('time.dayofyear').mean(dim='time')
         ts_tmp = temp.groupby('time.dayofyear') - ts_tmp_avg
-        # of precip -- scaled anomalies
+        # then of precip -- scaled anomalies
+        # has to be corrected differently because prcp has to be above or equal zero!
         ts_pre_avg = prcp.sel(time=slice(*year_range))
         ts_pre_avg = ts_pre_avg.groupby('time.dayofyear').mean(dim='time')
         ts_pre_ano = prcp.groupby('time.dayofyear') - ts_pre_avg
@@ -670,13 +678,18 @@ def process_gcm_data_adv_daily(gdir, output_filesuffix='', prcp=None,
         # are used later for where ts_pre_avg == 0
         ts_pre = prcp.groupby('time.dayofyear') / ts_pre_avg
 
-        # for temp
+        # here the actual anomaly correction to match the mean begins:
+        # for temperature
+        # loc_tmp: mean temperature for each day of year of historical climate period
+        # (from the "observed"/reanalysis climate [not GCM])
         loc_tmp = dsclimobs.temp.groupby('time.dayofyear').mean()
+        # correct the scaled temperature anomalies
         ts_tmp = ts_tmp.groupby('time.dayofyear') + loc_tmp
 
         # for prcp
         loc_pre = dsclimobs.prcp.groupby('time.dayofyear').mean()
         # scaled anomalies
+        # loc_tmp: what is multiplied as factor to match the mean
         ts_pre = ts_pre.groupby('time.dayofyear') * loc_pre
         # standard anomalies
         ts_pre_ano = ts_pre_ano.groupby('time.dayofyear') + loc_pre
@@ -687,6 +700,7 @@ def process_gcm_data_adv_daily(gdir, output_filesuffix='', prcp=None,
         # The previous step might create negative values (unlikely). Clip them
         ts_pre.values = utils.clip_min(ts_pre.values, 0)
 
+        # check again that the correction went well
         assert np.all(np.isfinite(ts_pre.values))
         assert np.all(np.isfinite(ts_tmp.values))
     else:
@@ -696,22 +710,24 @@ def process_gcm_data_adv_daily(gdir, output_filesuffix='', prcp=None,
         output_filesuffix = output_filesuffix + '_no_correction'
         source = output_filesuffix + '_no_correction'
 
-    # for gradient
+    # for the temperature gradient
+    # no correction: we assume that the temperature gradient
+    # does not change over the years
+    # we use the same mean annual cyle from the climate dataset for the GCMs
     try:
+        # amount of days for each year
         aod = temp.groupby('time.year').count()
         # aod[aod == 365].year
         hist_gradient = dsclimobs.gradient.groupby(
             'time.dayofyear').mean().values
         # use the same gradient for every year
         # may be this could be done differently to save data...
-        # print(hist_gradient)
         # amount of years: len(temp.time.values) / 365
-        # TODO: check this
         gradient_ls = []
         for y in aod.year:
             if aod.sel(year=y) == 365:
                 # more correct would be to delete Feb 29th, however,
-                # we prefer to be consisten with the climate dataset
+                # we prefer to be consistent with the climate dataset
                 # (e.g. WFDE5_CRU)
 
                 gradient_ls.append(np.delete(hist_gradient, 366 - 1))
@@ -726,13 +742,8 @@ def process_gcm_data_adv_daily(gdir, output_filesuffix='', prcp=None,
         #                     len(dsclimobs.groupby('time.year').mean().year))
     except:
         gradient = None
-    # elif temporal_resol =='daily':
-    #    temp_std = None
-    # print(len(temp.time.values), len(ts_pre.values), len(gradient), len(temp_std))
 
-    # time_unit = temp.time.units
-    # calendar = temp.time.calendar
-    # print(time_unit, calendar)
+    # write the data into a netCDF file
     write_climate_file(gdir, temp.time.values,
                        ts_pre.values, ts_tmp.values,
                        float(dsclimobs.ref_hgt),
