@@ -14,91 +14,11 @@ from oggm import cfg  # utils, workflow, tasks, graphics
 
 # import the MSsandbox modules
 from MBsandbox.mbmod_daily_oneflowline import (process_era5_daily_data, TIModel,
-                                               BASENAMES, process_wfde5_data)
+                                               BASENAMES, process_w5e5_data)
 from MBsandbox.help_func import (compute_stat, minimize_bias,
                                  optimize_std_quot_brentq)
 
-
-def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
-                           h=None, w=None, pf=2.5,
-                           absolute_bias=False, ys=np.arange(2000, 2019, 1),
-                           oggm_default_mb = False):
-    """ calibrates the melt factor (melt_f) by getting the bias to zero
-    comparing modelled mean specific mass balance between 2000 and 2020 to
-    observed geodetic data
-
-    Parameters
-    ----------
-    x : float
-        what is optimised (here the melt_f)
-    gd_mb: class instance
-        instantiated class of TIModel, this is updated by melt_f
-    mb_geodetic: float
-         geodetic mass balance between 2000-2020 of the instantiated glacier
-    h: np.array
-        heights of the instantiated glacier
-    w: np.array
-        widths of the instantiated glacier
-    pf: float
-        precipitation scaling factor
-        default is 2.5
-    absolute_bias : bool
-        if absolute_bias == True, the absolute value of the bias is returned.
-        if optimisation is done with Powell need absolute bias.
-        If optimisation is done with Brentq, absolute_bias has to be set False
-        The default is False.
-    ys: np.array
-        years for which specific mass balance is computed
-        default is 2000--2018
-        TODO: change this to 2000-2019 to match better
-              geodetic msm
-
-    Returns
-    -------
-    float
-        bias: modeled mass balance mean - reference mean (geodetic)
-        if absolute_bias = True:  np.abs(bias) is returned
-
-    """
-    if oggm_default_mb:
-        gd_mb.mu_star = x
-    else:
-        gd_mb.melt_f = x
-
-    gd_mb.prcp_fac = pf
-    mb_specific = gd_mb.get_specific_mb(heights=h,
-                                        widths=w,
-                                        year=ys).mean()
-    if absolute_bias:
-        bias_calib = np.abs(np.mean(mb_specific -
-                                    mb_geodetic))
-    else:
-        bias_calib = np.mean(mb_specific - mb_geodetic)
-
-    return bias_calib
-
-
-def optimize_std_quot_brentq_geod(x, gd_mb=None, mb_geodetic=None,
-                                  mb_glaciological=None,
-                                  h=None, w=None,
-                                  ys_glac=np.arange(1979, 2019, 1)):
-    pf = x
-    # compute optimal melt_f according to geodetic data
-    melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 1, 10000,
-                                       xtol=0.01,
-                                       args=(gd_mb, mb_geodetic, h, w, pf),
-                                       disp=True)
-
-    gd_mb.melt_f = melt_f_opt
-    gd_mb.prcp_fac = pf
-    # now compute std over this time period using
-    # direct glaciological observations
-    mod_std = gd_mb.get_specific_mb(heights=h, widths=w,
-                                    year=ys_glac).std()
-    ref_std = mb_glaciological.loc[ys_glac].values.std()
-    quot_std = mod_std / ref_std
-
-    return 1 - quot_std
+from MBsandbox.help_func import minimize_bias_geodetic, optimize_std_quot_brentq_geod
 
 
 def get_opt_pf_melt_f(gd, mb_type='mb_monthly', grad_type='cte',
@@ -129,18 +49,20 @@ def get_opt_pf_melt_f(gd, mb_type='mb_monthly', grad_type='cte',
             oggm.shop.ecmwf.process_ecmwf_data(gd, dataset='ERA5dr')
             input_fs = ''
 
-        elif dataset == 'WFDE5_monthly_cru':
+        elif dataset == 'WFDE5_CRU_monthly':
             baseline_climate = 'WFDE5_CRU'
-            process_wfde5_data(gd, temporal_resol='monthly')
+            process_w5e5_data(gd, climate_type=baseline_climate,
+                              temporal_resol='monthly')
             input_fs = '_monthly_WFDE5_CRU'
     elif mb_type == 'mb_real_daily':
         if dataset == 'ERA5':
             baseline_climate = 'ERA5dr'
             process_era5_daily_data(gd)
             input_fs = ''
-        elif dataset == 'WFDE5_monthly_cru':
+        elif dataset == 'WFDE5_CRU_monthly':
             baseline_climate = 'WFDE5_CRU'
-            process_wfde5_data(gd, temporal_resol='daily')
+            process_w5e5_data(gd, climate_type=baseline_climate,
+                              temporal_resol='daily')
             input_fs = '_daily_WFDE5_CRU'
 
     mbdf = gd.get_ref_mb_data(input_filesuffix=input_fs)

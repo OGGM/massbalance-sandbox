@@ -19,7 +19,7 @@ from oggm.shop.ecmwf import get_ecmwf_file
 from oggm import tasks, cfg
 # imports from MBsandbox package modules
 from MBsandbox.mbmod_daily_oneflowline import (process_era5_daily_data,
-                                               process_wfde5_data)
+                                               process_w5e5_data, get_w5e5_file)
 
 warnings.filterwarnings("once", category=DeprecationWarning)
 # %%
@@ -70,28 +70,54 @@ class Test_climate_daily_datasets:
         assert_allclose(ds_ERA5_daily_g.resample(time='1M').mean().t2m.values,
                         ds_ERA5_g.t2m.values, rtol=1e-4)
 
-    def test_WFDE5_daily_dataset(self):
+    def test_WFDE5_W5E5_daily_dataset(self):
 
-        dataset = 'WFDE5_daily_cru'
+        dataset = 'WFDE5_CRU_daily'
+        path_tmp = get_w5e5_file(dataset, 'tmp')
+        path_prcp = get_w5e5_file(dataset, 'prcp')
+        ds_WFDE5_daily_tmp = xr.open_dataset(path_tmp)
+        ds_WFDE5_daily_prcp = xr.open_dataset(path_prcp)
 
-        pathi = ('/home/lilianschuster/Schreibtisch/PhD/WP0_bayesian/'
-                         'WPx_WFDE5/wfde5_cru/daily/v1.1/'
-                         'wfde5_cru_tmp_1979-2018_flat.nc')
-        ds_WFDE5_daily_tmp = xr.open_dataset(pathi)
+        dataset = 'W5E5_daily'
+        path_tmp = get_w5e5_file(dataset, 'tmp')
+        path_prcp = get_w5e5_file(dataset, 'prcp')
+        #pathi = ('/home/lilianschuster/Schreibtisch/PhD/WP0_bayesian/'
+        #                 'WPx_WFDE5/wfde5_cru/daily/v1.1/'
+        #                 'wfde5_cru_tmp_1979-2018_flat.nc')
+        ds_W5E5_daily_tmp = xr.open_dataset(path_tmp)
+        ds_W5E5_daily_prcp = xr.open_dataset(path_prcp)
+
         # xr.open_dataset(get_ecmwf_file(dataset, 'tmp'))
-        ds_WFDE5_daily_tmp['time.month'][0] == 1
-        ds_WFDE5_daily_tmp['time.month'][-1] == 12
+        for ds in [ds_WFDE5_daily_tmp, ds_WFDE5_daily_prcp,
+                   ds_W5E5_daily_tmp, ds_W5E5_daily_prcp]:
+            assert ds['time.month'][0] == 1
+            assert ds['time.month'][-1] == 12
+            assert ds['time.year'][0] == 1979
 
+        for ds_W5E5 in [ds_W5E5_daily_tmp, ds_W5E5_daily_prcp]:
+            assert ds_W5E5['time.year'][-1] == 2019
+
+        # WFDE5 old version should start in 1979 and end in 2018
+        for ds_WFDE5 in [ds_WFDE5_daily_tmp, ds_WFDE5_daily_prcp]:
+            assert ds_WFDE5['time.year'][-1] == 2018
+
+        # temperature checks
         # checks if it is in Kelvin
         assert np.all(ds_WFDE5_daily_tmp.Tair > 0)
+        assert np.all(ds_W5E5_daily_tmp.tas>0)
         # not too high temperatures
         assert np.max(ds_WFDE5_daily_tmp.Tair) < 350
+        assert np.max(ds_W5E5_daily_tmp.tas) < 350
 
-        # ERA5 daily should start in 1979 and end in 2018
-        assert ds_WFDE5_daily_tmp['time.year'][0] == 1979
-        assert ds_WFDE5_daily_tmp['time.year'][-1] == 2018
-        assert ds_WFDE5_daily_tmp['time.month'][0] == 1
-        assert ds_WFDE5_daily_tmp['time.month'][-1] == 12
+        # prcp checks
+        assert np.all(ds_WFDE5_daily_prcp.tp >= 0)
+        assert np.all(ds_W5E5_daily_prcp.pr >= 0)
+        # they have different prcp units
+        # (is accounted for in process_W5E5_data)
+        assert ds_W5E5_daily_prcp.pr.units == 'kg m-2 s-1'
+        assert ds_W5E5_daily_prcp.pr.max() < 1e-2
+        assert ds_WFDE5_daily_prcp.tp.units == 'kg m-2 day-1 ~ mm/day'
+        assert ds_WFDE5_daily_prcp.tp.max() > 100
 
         # compare the daily dataset to the monthly:
         ds_ERA5 = xr.open_dataset(get_ecmwf_file('ERA5', 'tmp'))
@@ -103,42 +129,61 @@ class Test_climate_daily_datasets:
 
         # compute all the distances and choose nearest gridpoint
         # this also checks if the flattened version is used!
-        c = ((ds_WFDE5_daily_tmp.longitude - lon)**2
+        c_wfde5 = ((ds_WFDE5_daily_tmp.longitude - lon)**2
              + (ds_WFDE5_daily_tmp.latitude - lat)**2)
-        ds_WFDE5_daily_tmp_g = ds_WFDE5_daily_tmp.isel(points=c.argmin())
+        ds_WFDE5_daily_tmp_g = ds_WFDE5_daily_tmp.isel(points=c_wfde5.argmin())
+        c_w5e5 = ((ds_W5E5_daily_tmp.longitude - lon)**2
+             + (ds_W5E5_daily_tmp.latitude - lat)**2)
+        ds_W5E5_daily_tmp_g = ds_W5E5_daily_tmp.isel(points=c_w5e5.argmin())
+        ds_W5E5_daily_tmp_g = ds_W5E5_daily_tmp_g.sel(time=slice('1979-01-01',
+                                           '2018-12-01'))
 
         ds_ERA5_g = ds_ERA5.sel(time=slice('1979-01-01',
                                            '2018-12-01')).sel(longitude=lon,
                                                               latitude=lat,
                                                               method='nearest')
-        # do we use a similar longitude/latitude (not exactly the same, as ERA5 is
-        # finer than WFDE5
+        # do we use a similar longitude/latitude? (not exactly the same, as ERA5 is
+        # finer than WFDE5/W5E5)
         assert_allclose(ds_WFDE5_daily_tmp_g.longitude.values,
+                        ds_ERA5_g.longitude.values,
+                        atol=0.6)
+        assert_allclose(ds_W5E5_daily_tmp_g.longitude.values,
                         ds_ERA5_g.longitude.values,
                         atol=0.6)
         assert_allclose(ds_WFDE5_daily_tmp_g.latitude.values,
                         ds_ERA5_g.latitude.values,
                         atol=0.6)
+        assert_allclose(ds_W5E5_daily_tmp_g.latitude.values,
+                        ds_ERA5_g.latitude.values,
+                        atol=0.6)
 
-        # do the two datasets have similar monthly temperature for HEF
+        # do the three datasets have similar monthly temperature for HEF
         # at the nearest gridpoint to HEF (wfde5 temp against HEF temp. )
         wfde5_tmp_m = ds_WFDE5_daily_tmp_g.resample(time='MS').mean().Tair.values
-        tmp_corr= np.corrcoef(wfde5_tmp_m,
+        w5e5_tmp_m = ds_W5E5_daily_tmp_g.resample(time='MS').mean().tas.values
+
+        tmp_corr_wfde5 = np.corrcoef(wfde5_tmp_m,
                               ds_ERA5_g.t2m.values)[0][1]
-        assert tmp_corr > 0.9
+        tmp_corr_w5e5 = np.corrcoef(w5e5_tmp_m,
+                               ds_ERA5_g.t2m.values)[0][1]
+        assert tmp_corr_wfde5 > 0.95
+        assert tmp_corr_w5e5 > 0.95
 
 
-class Test_process_era5_daily_wfde5_hef:
+
+class Test_process_era5_daily_wfde5_w5e5_hef:
 
     def test_process_era5_daily_data(self, gdir):
         process_era5_daily_data(gdir, y0=1979, y1=2018)
 
-        filename = 'climate_historical_daily'
-        fpath = gdir.get_filepath(filename)
+        fs = '_daily_ERA5'
+        fpath = gdir.get_filepath('climate_historical', filesuffix=fs)
 
         # check the climate files of an individual glacier (Hintereisferner)
         xr_nc = xr.open_dataset(fpath)
-        assert np.all(xr_nc.prcp) > 0
+        assert np.all(xr_nc.prcp) >= 0
+        # daily precipitation amount in kg m-2  (not in kg m-2 s-1)
+        assert xr_nc.prcp.max() > 1
         # to be sure that there are no erroneaous filling values inside
         assert np.all(xr_nc.prcp) < 10000
         # temperature values are in °C and in the right range
@@ -185,25 +230,43 @@ class Test_process_era5_daily_wfde5_hef:
             # cfg.PARAMS[hydro_month_nh = 10], this is in conflict with 8
             process_era5_daily_data(gdir, y0=1979, y1=2018, hydro_month_nh=8)
 
-    def test_process_wfde5_data(self, gdir):
+    def test_process_w5e5_data(self, gdir):
 
         # first with daily resolution
-        process_wfde5_data(gdir, y0=1979, y1=2018, temporal_resol='daily')
+        cfg.PARAMS['hydro_month_nh'] = 1
+        process_w5e5_data(gdir, y0=1979, y1=2019, temporal_resol='daily',
+                          climate_type='W5E5')
+        process_w5e5_data(gdir, y0=1979, y1=2018, temporal_resol='daily',
+                          climate_type='WFDE5_CRU')
+
 
         filename = 'climate_historical'
-        fpath = gdir.get_filepath(filename, filesuffix='_daily_wfde5_cru')
-
+        fpath = gdir.get_filepath(filename, filesuffix='_daily_WFDE5_CRU')
         # check the climate files of an individual glacier (Hintereisferner)
         xr_nc = xr.open_dataset(fpath)
+        fpath_w5e5 = gdir.get_filepath(filename, filesuffix='_daily_W5E5')
+        # check the climate files of an individual glacier (Hintereisferner)
+        xr_nc_w5e5 = xr.open_dataset(fpath_w5e5)
+
         assert np.all(xr_nc.prcp) >= 0
+        assert np.all(xr_nc_w5e5.prcp) >= 0
+
+        # daily precipitation amount in kg m-2  (not in kg m-2 s-1)
+        assert xr_nc.prcp.max() > 1
+        assert xr_nc_w5e5.prcp.max() > 1
         # to be sure that there are no erroneous filling values inside
         assert np.all(xr_nc.prcp) < 10000
+        assert np.all(xr_nc_w5e5.prcp) < 10000
         # temperature values are in °C and in the right range
         assert np.all(xr_nc.temp) > -100
         assert np.all(xr_nc.temp) < 100
+        assert np.all(xr_nc_w5e5.temp) > -100
+        assert np.all(xr_nc_w5e5.temp) < 100
         # temperature gradient should be in the following range
         assert np.all(xr_nc.gradient > -0.015)
         assert np.all(xr_nc.gradient < -0.002)
+        assert np.all(xr_nc_w5e5.gradient > -0.015)
+        assert np.all(xr_nc_w5e5.gradient < -0.002)
 
         # all lapse rates values in one month should be equal
         # because only temperature and prcp is on daily basis
@@ -211,9 +274,13 @@ class Test_process_era5_daily_wfde5_hef:
         #                           0, atol=1e-3)
         np.testing.assert_allclose(xr_nc.resample(time='MS').std().gradient,
                                    0, atol=1e-3)
+        np.testing.assert_allclose(xr_nc_w5e5.resample(time='MS').std().gradient,
+                                   0, atol=1e-3)
 
         # summed up monthly precipitation from daily dataset
         xr_nc_prcp_m = xr_nc.prcp.resample(time='MS').sum()
+        xr_nc_prcp_m_w5e5 = xr_nc_w5e5.prcp.resample(time='MS').sum()
+
 
         oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset="ERA5",
                                            y0=1979, y1=2018)
@@ -224,50 +291,73 @@ class Test_process_era5_daily_wfde5_hef:
         # check if summed up monthly precipitation from daily
         # dataset equals approx to the WFDE5 monthly prcp
         # first with daily resolution
-        process_wfde5_data(gdir, y0=1979, y1=2018, temporal_resol='monthly',
-                           output_filesuffix='_monthly_wfde5_cru')
+        process_w5e5_data(gdir, y0=1979, y1=2018, temporal_resol='monthly',
+                           climate_type='WFDE5_CRU')
+        process_w5e5_data(gdir, y0=1979, y1=2019, temporal_resol='monthly',
+                          climate_type='W5E5')
         # an output filesuffix is needed, otherwise the
         # ERA5 dataset from above is used as it has the same name ...
-        filename = 'climate_historical'
         fpath_monthly = gdir.get_filepath(filename,
-                                          filesuffix='_monthly_wfde5_cru')
+                                          filesuffix='_monthly_WFDE5_CRU')
         xr_nc_monthly = xr.open_dataset(fpath_monthly)
+        fpath_monthly = gdir.get_filepath(filename,
+                                          filesuffix='_monthly_W5E5')
+        xr_nc_monthly_W5E5 = xr.open_dataset(fpath_monthly)
         assert np.all(xr_nc_monthly.prcp) > 0
+        assert np.all(xr_nc_monthly_W5E5.prcp) > 0
+        assert xr_nc_monthly.prcp.max() > 1
+        assert xr_nc_monthly_W5E5.prcp.max() > 1
         # to be sure that there are no erroneous filling values inside
         assert np.all(xr_nc_monthly.prcp) < 10000
+        assert np.all(xr_nc_monthly_W5E5) < 10000
         # temperature values are in °C and in the right range
         assert np.all(xr_nc_monthly.temp) > -100
         assert np.all(xr_nc_monthly.temp) < 100
+        assert np.all(xr_nc_monthly_W5E5.temp) > -100
+        assert np.all(xr_nc_monthly_W5E5.temp) < 100
         # temperature gradient should be in the following range
         assert np.all(xr_nc_monthly.gradient > -0.015)
         assert np.all(xr_nc_monthly.gradient < -0.002)
+        assert np.all(xr_nc_monthly_W5E5.gradient > -0.015)
+        assert np.all(xr_nc_monthly_W5E5.gradient < -0.002)
         assert_allclose(xr_nc_prcp_m.values,
                         xr_nc_monthly.prcp.values, rtol=1e-4)
-
+        assert_allclose(xr_nc_prcp_m_w5e5.values,
+                        xr_nc_monthly_W5E5.prcp.values,
+                        rtol=1e-4)
         # check if summed up monthly precipitation from daily
-        # dataset correlates to ERA5 monthly prpc ...
+        # dataset correlate for prpc ...
         assert np.corrcoef(xr_nc_prcp_m.values,
                            xr_nc_monthly_ERA5.prcp.values)[0][1] > 0.75
+        xr_nc_prcp_m_w5e5 = xr_nc_prcp_m_w5e5.sel(time=slice('1979', '2018'))
+        assert np.corrcoef(xr_nc_prcp_m.values,
+                           xr_nc_prcp_m_w5e5)[0][1] > 0.75
         #np.testing.assert_allclose(xr_nc_prcp_m.values,
         #                           xr_nc_monthly.prcp.values, rtol=1e-4)
 
         xr_nc_temp_m = xr_nc.temp.resample(time='MS').mean()
+        xr_nc_temp_m_w5e5 = xr_nc_w5e5.temp.resample(time='MS').mean()
+
         # check if mean temperature from daily dataset equals
         # approx. the WFDE5 monthly temp.
         assert_allclose(xr_nc_temp_m.values,
                         xr_nc_monthly.temp.values, atol=1e-4)
+        assert_allclose(xr_nc_temp_m_w5e5.values,
+                        xr_nc_monthly_W5E5.temp.values, atol=1e-4)
 
         # check if mean temperature from daily dataset equals
         # approx. to the ERA5 monthly temp.
         assert np.corrcoef(xr_nc_monthly_ERA5.temp.values,
                            xr_nc_temp_m.values)[0][1] > 0.75
-
+        xr_nc_temp_m = xr_nc_temp_m.sel(time=slice('1979', '2018'))
+        assert np.corrcoef(xr_nc_monthly_ERA5.temp.values,
+                           xr_nc_temp_m.values)[0][1] > 0.75
         with pytest.raises(InvalidParamsError):
             # dataset only goes from 1979--2018
             process_era5_daily_data(gdir, y0=1979, y1=2019)
 
             # in cfg.PARAMS that is initiated during testing,
-            # cfg.PARAMS[hydro_month_nh = 10], this is in conflict with 8
+            # cfg.PARAMS[hydro_month_nh = 1], this is in conflict with 8
             process_era5_daily_data(gdir, y0=1979, y1=2018, hydro_month_nh=8)
 
     # this could be replaced in OGGM base code test_shop.py when merged
@@ -275,19 +365,27 @@ class Test_process_era5_daily_wfde5_hef:
 
         # Init
         exps = ['CRU', 'HISTALP', 'ERA5', 'ERA5L', 'CERA',
-                'ERA5_daily', 'WFDE5_daily_cru']
+                'ERA5_daily', 'WFDE5_CRU_daily', 'W5E5_daily',
+                'WFDE5_CRU_monthly', 'W5E5_monthly']
         ref_hgts = []
         dft = []
         dfp = []
         for base in exps:
-            cfg.PARAMS['baseline_climate'] = base
-            if base not in ['ERA5_daily', 'WFDE5_daily_cru']:
+            if base not in ['ERA5_daily', 'WFDE5_CRU_daily',
+                            'W5E5_daily',
+                            'WFDE5_CRU_monthly', 'W5E5_monthly']:
+                cfg.PARAMS['baseline_climate'] = base
                 tasks.process_climate_data(gdir, output_filesuffix=base)
             elif base == 'ERA5_daily':
+                cfg.PARAMS['baseline_climate'] = base
                 process_era5_daily_data(gdir, output_filesuffix=base)
-            elif base == 'WFDE5_daily_cru':
-                process_wfde5_data(gdir, output_filesuffix=base,
+            elif base == 'WFDE5_CRU_daily' or base == 'W5E5_daily':
+                process_w5e5_data(gdir, output_filesuffix=base,
                                    temporal_resol='daily')
+            elif '_monthly' in base:
+                # wfde5_cru and w5e5
+                process_w5e5_data(gdir, output_filesuffix=base,
+                                  temporal_resol='monthly')
             f = gdir.get_filepath('climate_historical',
                                    filesuffix=base)
 
@@ -300,7 +398,9 @@ class Test_process_era5_daily_wfde5_hef:
         dfp = pd.concat(dfp, axis=1, keys=exps)
 
         # compare daily mean temperatures of ERA5 and WFDE5
-        assert dft[['ERA5_daily', 'WFDE5_daily_cru']].corr().min().min() > 0.95
+        assert dft[['ERA5_daily', 'WFDE5_CRU_daily']].corr().min().min() > 0.95
+        assert dft[['W5E5_daily', 'WFDE5_CRU_daily']].corr().min().min() > 0.95
+
         # want to compare mean monthly temperatures
         # (daily resolution datasets have to be resampled)
         dft = dft.resample('MS').mean()
@@ -335,8 +435,8 @@ class Test_process_era5_daily_wfde5_hef:
         dfm = dfp.groupby(dfp.index.month).mean()
         assert dfy.corr().min().min() > 0.5
         # monthly prcp of WFDE5 is quite different > 0.8 -> > 0.75
-        assert dfm.corr().min().min() > 0.75  # 0.8
+        assert dfm.corr().min().min() > 0.73  # 0.8
         dfavg = dfy.describe()
-        assert dfavg.loc['mean'].std() / dfavg.loc['mean'].mean() < 0.25  # %
+        assert dfavg.loc['mean'].std() / dfavg.loc['mean'].mean() < 0.28  # %
 
 

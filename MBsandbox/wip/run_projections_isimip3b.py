@@ -90,14 +90,14 @@ from oggm.shop import gcm_climate
 from oggm import entity_task
 
 # import the MBsandbox modules
-from MBsandbox.mbmod_daily_oneflowline import process_wfde5_data
+from MBsandbox.mbmod_daily_oneflowline import process_w5e5_data
 from MBsandbox.mbmod_daily_oneflowline import process_era5_daily_data, TIModel, BASENAMES
 from MBsandbox.help_func import compute_stat, minimize_bias, optimize_std_quot_brentq
 from MBsandbox.wip.help_func_geodetic import minimize_bias_geodetic, optimize_std_quot_brentq_geod, get_opt_pf_melt_f
 from MBsandbox.wip.bayes_calib_geod_direct import get_TIModel_clim_model_type, get_slope_pf_melt_f, bayes_dummy_model_better, bayes_dummy_model_ref_std, bayes_dummy_model_ref
 
-from MBsandbox.wip.projections_bayescalibration import (process_isimip_data, run_from_climate_data_TIModel,
-                                                        MultipleFlowlineMassBalance_TIModel, inversion_and_run_from_climate_with_bayes_mb_params)
+from MBsandbox.wip.projections_bayescalibration import (process_isimip_data,
+                                                        inversion_and_run_from_climate_with_bayes_mb_params)
 
 
 cfg.PARAMS['hydro_month_nh']=1
@@ -112,8 +112,6 @@ pd_geodetic_comp_alps.index = pd_geodetic_comp_alps.rgiid
 y0 = 1979
 ye = 2018+1
 
-#for mb_type in ['mb_monthly' , 'mb_daily', 'mb_real_daily',]: 
-#    for grad_type in ['cte', 'var_an_cycle']:
 if step=='ice_thickness_calibration':
     print(len(pd_geodetic_comp_alps.dropna().index.values))
 
@@ -127,7 +125,7 @@ if step=='ice_thickness_calibration':
     #if start_ind != 0 and end_ind < 3400:
     #    sys.exit(
     print('we want to calibrate for all Alpine glaciers at once, so all glaciers are selected, even if start_ind or end_ind are given')
-    for mb_type in ['mb_monthly', 'mb_daily', 'mb_real_daily']:
+    for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_real_daily']:
         for grad_type in ['cte', 'var_an_cycle']:
             # compute apparent mb from any mb ... 
             print(mb_type, grad_type)
@@ -199,9 +197,9 @@ elif step == 'run_proj':
         #workflow.execute_entity_task(oggm.shop.ecmwf.process_ecmwf_data, gdirs, dataset='ERA5dr', output_filesuffix='_monthly_ERA5dr')
         #workflow.execute_entity_task(process_era5_daily_data, gdirs, output_filesuffix='_daily_ERA5dr')
 
-        workflow.execute_entity_task(process_wfde5_data, gdirs, output_filesuffix='_daily_WFDE5_CRU', temporal_resol='daily',
+        workflow.execute_entity_task(process_w5e5_data, gdirs, output_filesuffix='_daily_WFDE5_CRU', temporal_resol='daily',
                             climate_path='/home/www/lschuster/', cluster=True)
-        workflow.execute_entity_task(process_wfde5_data, gdirs, output_filesuffix='_monthly_WFDE5_CRU', temporal_resol='monthly',
+        workflow.execute_entity_task(process_w5e5_data, gdirs, output_filesuffix='_monthly_WFDE5_CRU', temporal_resol='monthly',
                             climate_path='/home/www/lschuster/', cluster=True)
 
         print('start_monthly')
@@ -225,7 +223,7 @@ elif step == 'run_proj':
     else:
         gdirs = workflow.init_glacier_directories( pd_geodetic_comp_alps.dropna().index.values[start_ind:end_ind])
     
-    for mb_type in ['mb_monthly', 'mb_daily', 'mb_real_daily']: # 'mb_monthly', 
+    for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_real_daily']: # 'mb_monthly',
         for grad_type in ['cte', 'var_an_cycle']:
             log.workflow(print(len(gdirs)))
             log.workflow(print(mb_type, grad_type))

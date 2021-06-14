@@ -19,7 +19,7 @@ import logging
 #log = logging.getLogger(__name__)
 #import aesara.tensor as aet
 import oggm
-from MBsandbox.mbmod_daily_oneflowline import process_wfde5_data
+from MBsandbox.mbmod_daily_oneflowline import process_w5e5_data
 from MBsandbox.wip.projections_bayescalibration import process_isimip_data, run_from_climate_data_TIModel, MultipleFlowlineMassBalance_TIModel
 ensemble = 'mri-esm2-0_r1i1p1f1'
 
@@ -27,9 +27,10 @@ base_url = ('https://cluster.klima.uni-bremen.de/~oggm/gdirs/oggm_v1.4/'
             'L1-L2_files/elev_bands')
 #@pytest.fixture(scope='class')
 #def get_hef_gcms(gdir):
-#TODO problem sigkill ...
 
+@pytest.mark.skip(reason="no way of currently testing this")
 def test_extend_past_climate():
+    # wip
     from MBsandbox.mbmod_daily_oneflowline import (
         compile_fixed_geometry_mass_balance_TIModel,
         extend_past_climate_run_TIModel)
@@ -38,19 +39,17 @@ def test_extend_past_climate():
     gdirs = workflow.init_glacier_directories(['RGI60-11.00897'])
     gdir = gdirs[0]
     dataset = 'WFDE5_CRU'
-    typ = 'mb_daily_cte'
+    typ = 'mb_pseudo_daily_cte'
     ensemble = 'mri-esm2-0_r1i1p1f1'
 
     cfg.PARAMS['hydro_month_nh'] = 1
     ssp = 'ssp126'
-    #process_wfde5_data(gdir, temporal_resol='monthly',
+    #process_w5e5_data(gdir, temporal_resol='monthly',
     #                   output_filesuffix='_monthly_WFDE5_CRU')
     #process_isimip_data(gdir, ensemble=ensemble, ssp=ssp,
     #                    climate_historical_filesuffix='_monthly_WFDE5_CRU',
     #                    temporal_resol='monthly'
     #                    )
-
-
 
     utils._workflow.compile_glacier_statistics([gdir], filesuffix=dataset)
     oggm.utils._workflow.compile_run_output([gdir],
@@ -65,28 +64,12 @@ def test_extend_past_climate():
                                                 prcp_fac=2, melt_f=200)
 
     gpath = '/home/lilianschuster/Schreibtisch/PhD/oggm_files/all/per_glacier/RGI60-11/RGI60-11.00/RGI60-11.00897/'
-    extend_past_climate_run_TIModel(past_run_file='/home/lilianschuster/Schreibtisch/PhD/oggm_files/all/run_output_ISIMIP3b_WFDE5_CRU_mri-esm2-0_r1i1p1f1_mb_daily_cte_historical_test.nc',
+    extend_past_climate_run_TIModel(past_run_file='/home/lilianschuster/Schreibtisch/PhD/oggm_files/all/run_output_ISIMIP3b_WFDE5_CRU_mri-esm2-0_r1i1p1f1_mb_pseudo_daily_cte_historical_test.nc',
                                 fixed_geometry_mb_file='/home/lilianschuster/Schreibtisch/PhD/oggm_files/all/fixed_geometry_mass_balance_{}_{}.csv'.format(dataset, typ),
                                 glacier_statistics_file= '/home/lilianschuster/Schreibtisch/PhD/oggm_files/all/glacier_statistics_{}_{}.csv'.format(dataset, typ),
                                 path=gpath + 'extended_test.nc',
                                 use_compression=True)
 
-
-
-def test_proble():
-    from oggm import cfg, utils, workflow, tasks, graphics
-    from oggm.core import massbalance, flowline, climate
-    import logging
-    log = logging.getLogger(__name__)
-    cfg.initialize()
-    cfg.PATHS['working_dir'] = utils.gettempdir(dirname='test', reset=False)
-    gdirs = workflow.init_glacier_directories(['RGI60-11.00364'], #'RGI60-11.03677'], #'RGI60-11.03471'],
-                                              from_prepro_level=2,
-                                              prepro_border=10,
-                                              prepro_base_url=base_url,
-                                              prepro_rgi_version='62',
-                                              )
-    gdir = gdirs[0]
 
 
 def test_ssp585_problem():
@@ -106,8 +89,9 @@ def test_ssp585_problem():
     cfg.PARAMS['hydro_month_nh'] = 1
     ssp ='ssp585'
 
-    process_wfde5_data(gdir, temporal_resol='monthly',
-                       output_filesuffix='_monthly_WFDE5_CRU')
+    process_w5e5_data(gdir, temporal_resol='monthly',
+                       climate_type='WFDE5_CRU'
+                       )
     process_isimip_data(gdir, ensemble=ensemble, ssp=ssp,
                         climate_historical_filesuffix='_monthly_WFDE5_CRU',
                         temporal_resol='monthly'
@@ -121,8 +105,8 @@ class TestProcessIsimipData:
         cfg.PARAMS['hydro_month_nh'] = 1
         ssp ='ssp126'
 
-        process_wfde5_data(gdir, temporal_resol='monthly',
-                           output_filesuffix='_monthly_WFDE5_CRU')
+        process_w5e5_data(gdir, temporal_resol='monthly',
+                           climate_type='WFDE5_CRU')
 
         process_isimip_data(gdir, ensemble=ensemble, ssp=ssp,
                             climate_historical_filesuffix='_monthly_WFDE5_CRU')
@@ -215,8 +199,9 @@ class TestProcessIsimipData:
 
         cfg.PARAMS['hydro_month_nh'] = 1
 
-        process_wfde5_data(gdir, temporal_resol='daily',
-                           output_filesuffix='_daily_WFDE5_CRU')
+        process_w5e5_data(gdir, temporal_resol='daily',
+                           climate_type='WFDE5_CRU'
+                           )
         process_isimip_data(gdir, ensemble=ensemble, ssp=ssp,
                             temporal_resol='daily',
                             climate_historical_filesuffix='_daily_WFDE5_CRU')
