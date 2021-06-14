@@ -84,8 +84,8 @@ def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
                            h=None, w=None, pf=2.5,
                            absolute_bias=False,
                            ys=np.arange(2000, 2019, 1),
-                           oggm_default_mb = False,
-                           **kwargs):
+                           oggm_default_mb=False,
+                           spinup=False):
     """ calibrates the melt factor (melt_f) by getting the bias to zero
     comparing modelled mean specific mass balance between 2000 and 2020 to
     observed geodetic data
@@ -115,8 +115,8 @@ def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
         default is 2000--2019 (when using W5E5)
     oggm_default_mb : bool
         if default oggm mass balance should be used (default is False)
-    **kwargs :
-        send to get_specific_mb , e.g. spinup=True
+    spinup : bool
+        send to get_specific_mb (for sfc type distinction)
 
     Returns
     -------
@@ -131,10 +131,19 @@ def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
         gd_mb.melt_f = x
 
     gd_mb.prcp_fac = pf
-    mb_specific = gd_mb.get_specific_mb(heights=h,
-                                        widths=w,
-                                        year=ys,
-                                        **kwargs).mean()
+
+    if spinup == False:
+        mb_specific = gd_mb.get_specific_mb(heights=h,
+                                            widths=w,
+                                            year=ys
+                                            ).mean()
+    else:
+        mb_specific = gd_mb.get_specific_mb(heights=h,
+                                            widths=w,
+                                            year=ys,
+                                            spinup=spinup
+                                            ).mean()
+
     if absolute_bias:
         bias_calib = np.abs(np.mean(mb_specific -
                                     mb_geodetic))
