@@ -5,7 +5,7 @@ Next generation of OGGM's mass-balance models. Work in process!
 At the moment these options are available:
 - to compute degree days:
     - using monthly temperatures ('mb_monthly'), default option in OGGM
-    - using monthly temperatures and daily temp std to generate daily temp. assuming normal distributed data ('mb_daily')
+    - using monthly temperatures and daily temp std to generate daily temp. assuming normal distributed data ('mb_pseudo_daily')
     - using daily temperatures ('mb_real_daily')
 - temperature lapse rates:
     - using a constant calibrated value independent of location and season (-6.5 K/km, grad_type: cte), default option in OGGM
@@ -42,16 +42,21 @@ A simple use case is explained in **docs/how_to_use.ipynb**.
 
 
 # inside of MBsandbox
-ToDO more nicely ...
 
-- ***mbmod_daily_oneflowline.py***: ***write_climate_file***, ***process_era5_daily_data***, ***mb_modules***
-- ***help_func.py***: need helper functions to minimize the bias, optimise std_quot and to compute performance statistics
-- **tests_mbmodules**: tests for different functions inside of ***mbmod_daily_oneflowline.py***, ***help_func.py*** and for the ***ERA5_daily*** dataset
-
+- ***mbmod_daily_oneflowline.py***: process climate data, new mass-balance model TIModel_Parent with children, ...
+- ***flowline_TIModel.py***: copies of run_from_climate, run_random_climate that are compatible with TIModel  
+- ***help_func.py***: helper functions to minimize the bias, optimise std_quot, to calibrate the melt factor given
+      precipitation factor and geodetic observations, and to compute performance statistics
+- **tests**: tests for different functions
+- *wip/...*: work in process folder without documentation
 
 # docs/*:
 
 ### simple use case: ***how_to_use.ipynb***
+
+### how to get daily mb output and calibrate with geodetic data: ***how:to_daily_input_daily_output.ipynb***
+
+### how to use MBsandbox with run_with_hydro ***hydro_compatility/hydro_compatibility_workflow.ipynb***
 
 ### mass balance intercomparison with figures: ***intercomparison_w_figures/****
 - ***HEF_mb_type_intercomparison_oneflowline.ipynb***: shows mb type intercomparison for Hintereisferner
@@ -66,8 +71,7 @@ ToDO more nicely ...
 - ***preprocess_ERA5_daily/cluster_aggregate_dailyERA5.ipynb***: how to preprocess the ERA5_daily files
   (end product is here: https://cluster.klima.uni-bremen.de/~oggm/climate/era5/daily/v1.0/)
 
-
-
+  
 <<<<<<< HEAD
 
 =======

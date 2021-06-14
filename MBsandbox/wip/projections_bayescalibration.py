@@ -50,6 +50,7 @@ from oggm.core.flowline import flowline_model_run
 from oggm.core.massbalance import MultipleFlowlineMassBalance, MassBalanceModel
 from oggm.core import climate
 from MBsandbox.mbmod_daily_oneflowline import write_climate_file
+from MBsandbox.flowline_TIModel import run_from_climate_data_TIModel
 from MBsandbox.wip.bayes_calib_geod_direct import bayes_dummy_model_better
 
 import logging
@@ -58,86 +59,6 @@ log = logging.getLogger(__name__)
 
 
 ###############################################
-# # do it similar as in run_from_climate_data()
-@entity_task(log)
-def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
-                                  max_ys=None,
-                                  store_monthly_step=False,
-                                  climate_filename='climate_historical',
-                                  climate_input_filesuffix='',
-                                  output_filesuffix='',
-                                  init_model_filesuffix=None,
-                                  init_model_yr=None,
-                                  init_model_fls=None,
-                                  zero_initial_glacier=False,
-                                  bias=None, temperature_bias=None, melt_f=None,
-                                  precipitation_factor=None,
-                                  check_calib_params=False,
-                                  mb_type='mb_monthly', grad_type='cte',
-                                  **kwargs):
-    """
-    same as in run_from_climate_data but compatible with TIModel
-    """
-    # same as run_from_climate_data but compatible with TIModel ...
-    if init_model_filesuffix is not None:
-        fp = gdir.get_filepath('model_geometry',
-                               filesuffix=init_model_filesuffix)
-                
-        fmod = FileModel(fp)
-        if init_model_yr is None:
-            init_model_yr = fmod.last_yr
-        fmod.run_until(init_model_yr)
-        init_model_fls = fmod.fls
-        if ys is None:
-            ys = init_model_yr
-
-    # Take from rgi date if not set yet
-    if ys is None:
-        try:
-            ys = gdir.rgi_date.year
-        except AttributeError:
-            ys = gdir.rgi_date
-        # The RGI timestamp is in calendar date - we convert to hydro date,
-        # i.e. 2003 becomes 2004 (so that we don't count the MB year 2003
-        # in the simulation)
-        # See also: https://github.com/OGGM/oggm/issues/1020
-        ys += 1
-
-    # Final crop
-    if min_ys is not None:
-        ys = ys if ys > min_ys else min_ys
-    if max_ys is not None:
-        ys = ys if ys < max_ys else max_ys
-
-    mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=TIModel,
-                                             prcp_fac=precipitation_factor,
-                                             melt_f=melt_f,
-                                             filename=climate_filename,
-                                             bias=bias,
-                                             input_filesuffix=climate_input_filesuffix,
-                                             mb_type=mb_type,
-                                             grad_type=grad_type,
-                                             # check_calib_params=check_calib_params,
-                                             )
-
-    # if temperature_bias is not None:
-    #    mb.temp_bias = temperature_bias
-    if precipitation_factor is not None:
-        mb.prcp_fac = precipitation_factor
-
-    # do the quality check!
-    mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
-
-    if ye is None:
-        # Decide from climate (we can run the last year with data as well)
-        ye = mb.flowline_mb_models[0].ye + 1
-
-    return flowline_model_run(gdir, output_filesuffix=output_filesuffix,
-                              mb_model=mb, ys=ys, ye=ye,
-                              store_monthly_step=store_monthly_step,
-                              init_model_fls=init_model_fls,
-                              zero_initial_glacier=zero_initial_glacier,
-                              **kwargs)
 
 
 # make an execute_entity_task out of this to make it parallelisable!

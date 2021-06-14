@@ -70,11 +70,9 @@ from MBsandbox.wip.projections_bayescalibration import bayes_mbcalibration
 
 cfg.PARAMS['hydro_month_nh'] = 1
 
-for mb_type in ['mb_monthly' , 'mb_daily', 'mb_real_daily',]: 
+for mb_type in ['mb_monthly' , 'mb_pseudo_daily', 'mb_real_daily',]:
     for grad_type in ['cte', 'var_an_cycle']:
-        
         typ = '{}_{}'.format(mb_type, grad_type)
-
         if uniform_firstprior == True:
             pd_params = pd.read_csv(path +
                                     'only_perfect_precalibration_alps_refglaciers_{}_{}_{}_uniformfirstpriors.csv'.format(
@@ -122,10 +120,6 @@ for mb_type in ['mb_monthly' , 'mb_daily', 'mb_real_daily',]:
             path_samples = '/home/users/lschuster/bayesian_calibration/WFDE5_ISIMIP/burned_trace_plus200samples/'
             miss_samples = {}
             exist_samples = {}
-            #mb_type = 'mb_monthly'
-            #grad_type = 'cte'
-            #for mb_type in ['mb_monthly', 'mb_daily', 'mb_real_daily']:
-            #    for grad_type in ['cte', 'var_an_cycle']:
             typ = '{}_{}'.format(mb_type, grad_type)
             miss_samples[typ] = []
             exist_samples[typ] = []
