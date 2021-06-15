@@ -99,6 +99,7 @@ def test_ssp585_problem():
 
 
 #@pytest.mark.usefixtures('get_hef_gcms')
+@pytest.mark.skip(reason="this won't work on other computers")
 class TestProcessIsimipData:
 
     def test_process_isimip_data_monthly(self, gdir):
