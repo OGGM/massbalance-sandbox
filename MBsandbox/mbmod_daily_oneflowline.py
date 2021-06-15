@@ -1507,7 +1507,7 @@ class TIModel(TIModel_Parent):
 
             # residual is in mm w.e per year, so SEC_IN_MONTH .. but mb_daily
             # is per day!
-            mb_daily -= self.residual * self.SEC_IN_DAY / self.SEC_IN_YEARs
+            mb_daily -= self.residual * self.SEC_IN_DAY / self.SEC_IN_YEAR
             # this is for mb_daily otherwise it gives the wrong shape
             # mb_daily = mb_month.flatten()
             # instead of SEC_IN_MONTH, use instead len(prcpsol.T)==daysinmonth
