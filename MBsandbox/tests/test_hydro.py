@@ -35,7 +35,7 @@ ALL_DIAGS = ['volume', 'volume_bsl', 'volume_bwl', 'area', 'length',
 
 
 class Test_hydro:
-#    @pytest.mark.slow
+    #@pytest.mark.slow
     @pytest.mark.parametrize('store_monthly_hydro', [False, True], ids=['annual', 'monthly'])
     def test_hydro_out_random_oggm_core(self, gdir, #inversion_params,
                                         store_monthly_hydro):
@@ -279,6 +279,7 @@ class Test_hydro:
                     rtol = 1.1
                 elif mb_type == 'mb_real_daily':
                     # sum of daily solid prcp update
+                    rtol = 0.5
                     rtol = 0.8 #0.5
             if c in ['snow_bucket']:
                 continue
