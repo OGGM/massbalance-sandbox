@@ -35,7 +35,7 @@ ALL_DIAGS = ['volume', 'volume_bsl', 'volume_bwl', 'area', 'length',
 
 
 class Test_hydro:
-    @pytest.mark.slow
+    #@pytest.mark.slow
     @pytest.mark.parametrize('store_monthly_hydro', [False, True], ids=['annual', 'monthly'])
     def test_hydro_out_random_oggm_core(self, gdir, #inversion_params,
                                         store_monthly_hydro):
@@ -133,7 +133,7 @@ class Test_hydro:
             frac = odf['residual_mb'] / odf['melt_on_glacier']
             assert_allclose(frac, 0, atol=0.04)  # annual can be large (prob)
 
-    @pytest.mark.slow
+    # @pytest.mark.slow
     @pytest.mark.parametrize('mb_run', ['random', 'hist'])
     @pytest.mark.parametrize('mb_type', ['mb_monthly', 'mb_real_daily'])
     def test_hydro_monthly_vs_annual_from_oggm_core(self, gdir, #inversion_params,

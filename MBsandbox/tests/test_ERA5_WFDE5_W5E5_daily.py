@@ -360,34 +360,134 @@ class Test_process_era5_daily_wfde5_w5e5_hef:
             # cfg.PARAMS[hydro_month_nh = 1], this is in conflict with 8
             process_era5_daily_data(gdir, y0=1979, y1=2018, hydro_month_nh=8)
 
-    # this could be replaced in OGGM base code test_shop.py when merged
-    def test_all_at_once(self, gdir):
 
+    def test_process_mswep_data(self, gdir):
+
+        # first with daily resolution
+        cfg.PARAMS['hydro_month_nh'] = 1
+        process_w5e5_data(gdir, y0=1979, y1=2019, temporal_resol='monthly',
+                          climate_type='W5E5_MSWEP')
+        process_w5e5_data(gdir, y0=1979, y1=2019, temporal_resol='daily',
+                          climate_type='W5E5_MSWEP')
+
+        filename = 'climate_historical'
+        fpath_w5e5_mswep_m = gdir.get_filepath(filename, filesuffix='_monthly_W5E5_MSWEP')
+        # check the climate files of an individual glacier (Hintereisferner)
+        xr_nc_w5e5_mswep_m = xr.open_dataset(fpath_w5e5_mswep_m)
+        fpath_w5e5_mswep = gdir.get_filepath(filename, filesuffix='_daily_W5E5_MSWEP')
+        # check the climate files of an individual glacier (Hintereisferner)
+        xr_nc_w5e5_mswep_d = xr.open_dataset(fpath_w5e5_mswep)
+
+        assert np.all(xr_nc_w5e5_mswep_m.prcp) >= 0
+        assert np.all(xr_nc_w5e5_mswep_d.prcp) >= 0
+
+        # daily precipitation amount in kg m-2  (not in kg m-2 s-1)
+        assert xr_nc_w5e5_mswep_m.prcp.max() > 1
+        assert xr_nc_w5e5_mswep_d.prcp.max() > 1
+        # to be sure that there are no erroneous filling values inside
+        assert np.all(xr_nc_w5e5_mswep_m.prcp) < 10000
+        assert np.all(xr_nc_w5e5_mswep_d.prcp) < 10000
+        # temperature values are in °C and in the right range
+        assert np.all(xr_nc_w5e5_mswep_m.temp) > -100
+        assert np.all(xr_nc_w5e5_mswep_m.temp) < 100
+        assert np.all(xr_nc_w5e5_mswep_d.temp) > -100
+        assert np.all(xr_nc_w5e5_mswep_d.temp) < 100
+        # temperature gradient should be in the following range
+        assert np.all(xr_nc_w5e5_mswep_m.gradient > -0.015)
+        assert np.all(xr_nc_w5e5_mswep_m.gradient < -0.002)
+        assert np.all(xr_nc_w5e5_mswep_d.gradient > -0.015)
+        assert np.all(xr_nc_w5e5_mswep_d.gradient < -0.002)
+
+        # all lapse rates values in one month should be equal
+        # because only temperature and prcp is on daily basis
+        #np.testing.assert_allclose(xr_nc.resample(time='1M').std().prcp,
+        #                           0, atol=1e-3)
+        #np.testing.assert_allclose(xr_nc_w5e5_mswep_m.resample(time='MS').std().gradient,
+        #                           0, atol=1e-3)
+        np.testing.assert_allclose(xr_nc_w5e5_mswep_d.resample(time='MS').std().gradient,
+                                   0, atol=1e-3)
+
+        # summed up monthly precipitation from daily dataset
+        # xr_nc_w5e5_mswep_m #.prcp.resample(time='MS').sum()
+        xr_nc_prcp_m_mswep = xr_nc_w5e5_mswep_d.prcp.resample(time='MS').sum()
+
+        oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset="ERA5",
+                                           y0=1979, y1=2018)
+        filename = 'climate_historical'
+        fpath = gdir.get_filepath(filename)
+        xr_nc_monthly_ERA5 = xr.open_dataset(fpath)
+
+        # check if summed up monthly precipitation from daily
+        # dataset equals approx to MSWEP data
+        # first with daily resolution
+        assert_allclose(xr_nc_prcp_m_mswep.values,
+                        xr_nc_w5e5_mswep_m.prcp.values, rtol=1e-4)
+        # check if summed up monthly precipitation from daily
+        # dataset correlate for prpc ... with ERA5
+        xr_nc_prcp_m_mswep = xr_nc_prcp_m_mswep.sel(time=slice('1979', '2018'))
+        # not so much correlated (also does not use exactly the same gridpoint) !!!
+        assert np.corrcoef(xr_nc_prcp_m_mswep.values,
+                           xr_nc_monthly_ERA5.prcp.values)[0][1] > 0.45
+        #assert np.corrcoef(xr_nc_w5e5_mswep_m.values,
+        #                   xr_nc_prcp_m_mswep)[0][1] > 0.75
+        #np.testing.assert_allclose(xr_nc_prcp_m.values,
+        #                           xr_nc_monthly.prcp.values, rtol=1e-4)
+
+        xr_nc_temp_m_w5e5 = xr_nc_w5e5_mswep_d.temp.resample(time='MS').mean()
+
+        # check if mean temperature from daily dataset equals
+        # approx. the WFDE5 monthly temp.
+        assert_allclose(xr_nc_temp_m_w5e5.values,
+                        xr_nc_w5e5_mswep_m.temp.values,
+                        atol=1e-4)
+        #assert_allclose(xr_nc_temp_m_w5e5.values,
+        #                xr_nc_monthly_W5E5.temp.values, atol=1e-4)
+
+        # check if mean temperature from daily dataset equals
+        # approx. to the ERA5 monthly temp.
+        #assert np.corrcoef(xr_nc_monthly_ERA5.temp.values,
+        #                   xr_nc_temp_m_w5e5.values)[0][1] > 0.75
+        xr_nc_temp_m = xr_nc_temp_m_w5e5.sel(time=slice('1979', '2018'))
+        assert np.corrcoef(xr_nc_monthly_ERA5.temp.values,
+                           xr_nc_temp_m.values)[0][1] > 0.75
+
+
+    # this could be replaced in OGGM base code test_shop.py when merged
+    #@pytest.mark.parametrize('hydro_month', [10, 1])
+    def test_all_at_once(self, gdir):
         # Init
+        cfg.PARAMS['hydro_month_nh'] = 1
         exps = ['CRU', 'HISTALP', 'ERA5', 'ERA5L', 'CERA',
                 'ERA5_daily', 'WFDE5_CRU_daily', 'W5E5_daily',
-                'WFDE5_CRU_monthly', 'W5E5_monthly']
+                'W5E5_MSWEP_daily', 'WFDE5_CRU_monthly',
+                'W5E5_monthly', 'W5E5_MSWEP_monthly']
         ref_hgts = []
         dft = []
         dfp = []
         for base in exps:
             if base not in ['ERA5_daily', 'WFDE5_CRU_daily',
                             'W5E5_daily',
-                            'WFDE5_CRU_monthly', 'W5E5_monthly']:
+                            'WFDE5_CRU_monthly', 'W5E5_monthly',
+                            'W5E5_MSWEP_daily', 'W5E5_MSWEP_monthly']:
                 cfg.PARAMS['baseline_climate'] = base
                 tasks.process_climate_data(gdir, output_filesuffix=base)
+                fs = base
             elif base == 'ERA5_daily':
                 cfg.PARAMS['baseline_climate'] = base
                 process_era5_daily_data(gdir, output_filesuffix=base)
-            elif base == 'WFDE5_CRU_daily' or base == 'W5E5_daily':
-                process_w5e5_data(gdir, output_filesuffix=base,
+                fs = base
+            elif base == 'WFDE5_CRU_daily' or base == 'W5E5_daily' or base == 'W5E5_MSWEP_daily':
+                process_w5e5_data(gdir, climate_type=base[:-6],
                                    temporal_resol='daily')
+                fs = f'_daily_{base[:-6]}'
             elif '_monthly' in base:
                 # wfde5_cru and w5e5
-                process_w5e5_data(gdir, output_filesuffix=base,
+                process_w5e5_data(gdir, climate_type=base[:-8],
                                   temporal_resol='monthly')
+                fs = f'_monthly_{base[:-8]}'
+
             f = gdir.get_filepath('climate_historical',
-                                   filesuffix=base)
+                                   filesuffix=fs)
 
             with xr.open_dataset(f) as ds:
                 ref_hgts.append(ds.ref_hgt)
@@ -400,6 +500,9 @@ class Test_process_era5_daily_wfde5_w5e5_hef:
         # compare daily mean temperatures of ERA5 and WFDE5
         assert dft[['ERA5_daily', 'WFDE5_CRU_daily']].corr().min().min() > 0.95
         assert dft[['W5E5_daily', 'WFDE5_CRU_daily']].corr().min().min() > 0.95
+        # compare temp W5E5 to W5E5_MSWEP -> should be the same!!!
+        assert dft[['W5E5_daily', 'W5E5_MSWEP_daily']].corr().min().min() > 0.9999
+        assert dft[['W5E5_monthly', 'W5E5_MSWEP_monthly']].corr().min().min() > 0.9999
 
         # want to compare mean monthly temperatures
         # (daily resolution datasets have to be resampled)
@@ -433,10 +536,16 @@ class Test_process_era5_daily_wfde5_w5e5_hef:
         # Common period
         dfy = dfp.resample('AS').mean().dropna().iloc[1:] * 12
         dfm = dfp.groupby(dfp.index.month).mean()
-        assert dfy.corr().min().min() > 0.5
-        # monthly prcp of WFDE5 is quite different > 0.8 -> > 0.75
-        assert dfm.corr().min().min() > 0.73  # 0.8
+        assert dfy.corr().min().min() > 0.3 # CERA and MSWEP quite different
+        # without MSWEP (because different gridpoint)
+        assert dfy[dfy.columns.drop(['W5E5_MSWEP_monthly',
+                                    'W5E5_MSWEP_daily'])].corr().min().min() > 0.6
+        # monthly prcp cycle
+        # WFDE5 is quite different > 0.8 -> > 0.75
+        assert dfm.corr().min().min() > 0.7  # 0.8
+        #assert dfm[dfm.columns.drop(['W5E5_MSWEP_monthly',
+        #               'W5E5_MSWEP_daily'])].corr().min().min() > 0.7
         dfavg = dfy.describe()
-        assert dfavg.loc['mean'].std() / dfavg.loc['mean'].mean() < 0.28  # %
+        assert dfavg.loc['mean'].std() / dfavg.loc['mean'].mean() < 0.32 #28  # %
 
 
