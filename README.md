@@ -12,7 +12,10 @@ At the moment these options are available:
     - using lapse rates from ERA5 that vary throughout the year and inbetween glacier locations, 
     but that are constant inbetween the years (grad_type: 'var_an_cycle')
     - using lapse rates from ERA5 that vary throughout the year and inbetween glacier locations, 
-    different for each year (grad_type: 'var_an_cycle')
+    different for each year (grad_type: 'var')
+    
+ - sfc type distinction:
+    - TODO
 
 All options have been tested with the elevation flowline from Huss. 
 
@@ -70,9 +73,3 @@ A simple use case is explained in **docs/how_to_use.ipynb**.
 ### preprocess_ERA5_daily: this is just a side product
 - ***preprocess_ERA5_daily/cluster_aggregate_dailyERA5.ipynb***: how to preprocess the ERA5_daily files
   (end product is here: https://cluster.klima.uni-bremen.de/~oggm/climate/era5/daily/v1.0/)
-
-  
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/master
