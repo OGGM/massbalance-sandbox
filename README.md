@@ -62,41 +62,41 @@ The MBsandbox package can be imported in python by
 
     >>> import MBsandbox
 
-# inside of MBsandbox
+# code inside of MBsandbox
 
-- ***mbmod_daily_oneflowline.py***: 
+- [mbmod_daily_oneflowline.py](MBsandbox/mbmod_daily_oneflowline.py): 
     - process different climate data (WFDE5_CRU, ERA5_daily, W5E5, W5E5_MSWEP(prcp from MSWEP, temp. from W5E5)),
     - new mass-balance model `TIModel_Parent` with children `TIModel` and `TIModel_Sfc_Type`
-- ***flowline_TIModel.py***: copies of run_from_climate, run_random_climate that are compatible with `TIModel`, not yet tested for `TIModel_Sfc_Type`
-- ***help_func.py***: helper functions to minimize the bias, optimise standard deviation quotient for reference glaciers, to calibrate the melt factor given the precipitation factor and geodetic observations, and to compute performance statistics
-- **tests**: tests for different functions
-- *wip/...*: work in process folder without documentation
+- [flowline_TIModel.py](MBsandbox/flowline_TIModel.py): copies of run_from_climate, run_random_climate that are compatible with `TIModel`, not yet tested for `TIModel_Sfc_Type`
+- [help_func.py](MBsandbox/help_func.py): helper functions to minimize the bias, optimise standard deviation quotient for reference glaciers, to calibrate the melt factor given the precipitation factor and geodetic observations, and to compute performance statistics
+- [tests](MBsandbox/tests): tests for different functions
+- [wip](MBsandbox/wip): work in process folder without documentation
 
 # How to use!
-This is still work in process but there are some example notebooks with explanations: 
-- [docs/how_to_use.ipynb] : simple use case that shows how to use different climate resolutions
-- [docs/surface_type_distinction/oggm_sfc_type_bucket.ipynb] : use case of how the surface type distinction with different melt factors works
-    - inside of [docs/surface_type_distinction] there are some plots that show how the sfc type distinction and melt_f variation works
+This is still work in process but there are some example notebooks with explanations inside of the [docs folder](docs): 
+- [how_to_use.ipynb](docs/how_to_use.ipynb) : simple use case that shows how to use different climate resolutions
+- [surface_type_distinction/oggm_sfc_type_bucket.ipynb](docs/surface_type_distinction/oggm_sfc_type_bucket.ipynb) : use case of how the surface type distinction with different melt factors works
+    - inside of the folder [surface_type_distinction](docs/surface_type_distinction) there are some plots that show how the sfc type distinction and melt_f variation works
 
-- [docs/how_to_daily_input_daily_output.ipynb] : how to get daily mb output and calibrate with geodetic data
+- [how_to_daily_input_daily_output.ipynb](docs/how_to_daily_input_daily_output.ipynb) : how to get daily mb output and calibrate with geodetic data
 
-- [docs/hydro_compatility/hydro_compatibility_workflow.ipynb] : use case of how to use MBsandbox with run_with_hydro (works for W5E5, WFDE5_CRU and W5E5_MSWEP climate)
+- [hydro_compatility/hydro_compatibility_workflow.ipynb](docs/hydro_compatility/hydro_compatibility_workflow.ipynb) : use case of how to use MBsandbox with run_with_hydro (works for W5E5, WFDE5_CRU and W5E5_MSWEP climate)
 
 
-other notebooks not directly related to MBSandbox:
-- [docs/template_geodetic_MB_calibration.ipynb] : template how to calibrate a glacier by using the geodetic estimates (for the default `PastMassBalanceModel` of OGGM )
+**other notebooks not directly related to MBSandbox**:
+- [template_geodetic_MB_calibration.ipynb](docs/template_geodetic_MB_calibration.ipynb) : template how to calibrate a glacier by using the geodetic estimates (for the default `PastMassBalanceModel` of OGGM )
 
-- [docs/preprocess_ERA5_daily/cluster_aggregate_dailyERA5.ipynb] : how to preprocess the ERA5_daily files
+- [preprocess_ERA5_daily/cluster_aggregate_dailyERA5.ipynb](docs/preprocess_ERA5_daily/cluster_aggregate_dailyERA5.ipynb) : how to preprocess the ERA5_daily files
   (end product is here: https://cluster.klima.uni-bremen.de/~oggm/climate/era5/daily/v1.0/)
     - other preprocess / flattening workflows (for ISIMIP3a/3b, WFDE5, W5E5, MSWEP) are on the cluster (todo: upload them...?)
 
 
 *need to check if the following notebooks still work*:
-- [docs/intercomparison_w_figures/HEF_mb_type_intercomparison_oneflowline.ipynb] : shows mb type intercomparison for Hintereisferner
-    - plots in [docs/intercomparison_w_figures/figures_hef]
-- [docs/intercomparison_w_figures/refglaciersAlps_mb_type_intercomparison_oneflowline.ipynb] : shows intercomparison for Alpine reference glaciers
+- [intercomparison_w_figures/HEF_mb_type_intercomparison_oneflowline.ipynb](docs/intercomparison_w_figures/HEF_mb_type_intercomparison_oneflowline.ipynb) : shows mb type intercomparison for Hintereisferner
+    - plots in [intercomparison_w_figures/figures_hef](docs/intercomparison_w_figures/figures_hef)
+- [intercomparison_w_figures/refglaciersAlps_mb_type_intercomparison_oneflowline.ipynb](docs/intercomparison_w_figures/refglaciersAlps_mb_type_intercomparison_oneflowline.ipynb) : shows intercomparison for Alpine reference glaciers
   plots in:
-    - [docs/intercomparison_w_figures/figures_alps] (performance measures for Alpine reference glaciers)
-    - [docs/intercomparison_w_figures/figures_alps_indiv] (observed and modelled mb time series with performance measures for each Alpine reference glacier 
-    - [docs/intercomparison_w_figures/stats_Alps_6mb_models_N_5000_with_mean_an_cycle.csv] : dataset of optimal DDFs and performance measures for all Alpine glaciers and all mb types
+    - [intercomparison_w_figures/figures_alps](docs/intercomparison_w_figures/figures_alps) (performance measures for Alpine reference glaciers)
+    - [intercomparison_w_figures/figures_alps_indiv](docs/intercomparison_w_figures/figures_alps_indiv) (observed and modelled mb time series with performance measures for each Alpine reference glacier 
+    - [intercomparison_w_figures/stats_Alps_6mb_models_N_5000_with_mean_an_cycle.csv](docs/intercomparison_w_figures/stats_Alps_6mb_models_N_5000_with_mean_an_cycle.csv) : dataset of optimal DDFs and performance measures for all Alpine glaciers and all mb types
   
