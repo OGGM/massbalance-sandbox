@@ -11,8 +11,8 @@ At the moment these **options of climate resolution** are available inside `TIMo
     - using a constant calibrated value independent of location and season (-6.5 K/km, grad_type: cte), default option in OGGM
     - using lapse rates from ERA5 that vary throughout the year and inbetween glacier locations, 
     but that are constant inbetween the years (grad_type: 'var_an_cycle')
-    - [this has not been tested: using lapse rates from ERA5 that vary throughout the year and inbetween glacier locations, 
-    different for each year (grad_type: 'var')]
+    - ( this has not been tested: using lapse rates from ERA5 that vary throughout the year and inbetween glacier locations, 
+    different for each year (grad_type: 'var') )
 
 In addition, a **surface type distinction model is included with a bucket system together with a melt_f that varies with age** inside of `TIModel_Sfc_Type`:
 - there are two options included at the moment:
@@ -36,6 +36,7 @@ In addition, a **surface type distinction model is included with a bucket system
         - when using `get_monthly_mb` for several years, after computing the December month, the `pd_mb_annual` dataframe is updated
     - `get_annual_mb.pd_mb_monthly`: for each month
         - note that this stays empty if we only use get_annual_mb with annual melt_f_update
+
 
 All options have been tested with the elevation flowline from Huss. 
 
@@ -99,5 +100,3 @@ other notebooks not directly related to MBSandbox:
     - [docs/intercomparison_w_figures/figures_alps_indiv] (observed and modelled mb time series with performance measures for each Alpine reference glacier 
     - [docs/intercomparison_w_figures/stats_Alps_6mb_models_N_5000_with_mean_an_cycle.csv] : dataset of optimal DDFs and performance measures for all Alpine glaciers and all mb types
   
-
-
