@@ -132,17 +132,17 @@ def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
 
     gd_mb.prcp_fac = pf
 
-    if spinup == False:
-        mb_specific = gd_mb.get_specific_mb(heights=h,
-                                            widths=w,
-                                            year=ys
-                                            ).mean()
-    else:
+    try:
         mb_specific = gd_mb.get_specific_mb(heights=h,
                                             widths=w,
                                             year=ys,
                                             spinup=spinup
                                             ).mean()
+    except:
+        mb_specific = gd_mb.get_specific_mb(heights=h,
+                                        widths=w,
+                                        year=ys
+                                        ).mean()
 
     if absolute_bias:
         bias_calib = np.abs(np.mean(mb_specific -

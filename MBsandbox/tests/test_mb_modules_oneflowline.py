@@ -52,6 +52,49 @@ pf = 2.5
 # %%
 class Test_geodetic_sfc_type:
 
+    def test_sfc_type_update(self, gdir, mb_type='mb_monthly'):
+        cfg.PARAMS['hydro_month_nh'] = 1
+        # just choose any random melt_f
+        melt_f = 300
+        pf = 2  # precipitation factor
+
+        baseline_climate = 'W5E5'
+        temporal_resol = 'monthly'
+        process_w5e5_data(gdir, temporal_resol=temporal_resol,
+                          climate_type=baseline_climate)
+        h, w = gdir.get_inversion_flowline_hw()
+        mb_mod_annual_0_5_a = TIModel_Sfc_Type(gdir, melt_f, mb_type=mb_type,
+                                               melt_f_ratio_snow_to_ice=0.5, prcp_fac=pf,
+                                               melt_f_update='annual',
+                                               baseline_climate=baseline_climate
+                                               )
+        mb_mod_monthly_0_5_m = TIModel_Sfc_Type(gdir, melt_f, mb_type=mb_type,
+                                                melt_f_ratio_snow_to_ice=0.5, prcp_fac=pf,
+                                                melt_f_update='monthly',
+                                                baseline_climate=baseline_climate)
+
+        year = 2000
+        for mb_mod, year1 in zip([mb_mod_annual_0_5_a, mb_mod_monthly_0_5_m],
+                                 [2001, date_to_floatyear(2001, 1)]):
+            mb_mod.get_annual_mb(h, year=year, spinup=True)
+            # let's get manually the mb
+            # as we want to test update the melt_f_update needs to be equal to climate_resol output!
+            mb_mod.pd_bucket = mb_mod._add_delta_mb_vary_melt_f(h, year=year1,
+                                                                climate_resol=mb_mod.melt_f_update
+                                                                )
+            bucket_bef_update = mb_mod.pd_bucket.copy()
+            # let's do manually the update
+            mb_mod._update()
+            bucket_aft_update = mb_mod.pd_bucket.copy()
+            # the first column should be zero after the update
+            assert np.any(bucket_aft_update[mb_mod.first_snow_bucket] == 0)
+            # the first column from the dataframe before the update should be the second one
+            # of the next column
+            for j, b in enumerate(mb_mod.buckets[:-1]):
+                assert_allclose(bucket_bef_update[b],
+                                bucket_aft_update[bucket_aft_update.columns[j + 1]])
+
+
     @pytest.mark.parametrize('mb_type', ['mb_monthly', 'mb_pseudo_daily',
                                          'mb_real_daily'])
     def test_geodetic_fixed_var_melt_f(self, gdir, mb_type):
@@ -92,8 +135,8 @@ class Test_geodetic_sfc_type:
         assert np.all(mb_mod_1.pd_bucket == 0)
         mb_annual_1 = mb_mod_1.get_annual_mb(h, year=2000, spinup=True)
         # check if spinup was done and if it worked
-        assert np.shape(mb_mod_1.pd_mb_annual) == (len(mb_mod_1.fl.dis_on_line), 1+5)
-        assert np.all(mb_mod_1.pd_mb_annual.columns.values == np.arange(1995, 2001))
+        assert np.shape(mb_mod_1.pd_mb_annual) == (len(mb_mod_1.fl.dis_on_line), 1+6)
+        assert np.all(mb_mod_1.pd_mb_annual.columns.values == np.arange(1994, 2001))
         # this should not change as only get_annual_mb was done
         assert np.shape(mb_mod_1.pd_mb_monthly) == (len(mb_mod_1.fl.dis_on_line), 0)
         assert np.any(mb_mod_1.pd_bucket >= 0)
@@ -107,7 +150,7 @@ class Test_geodetic_sfc_type:
         # but 2004 not, because 2002 and 2003 are missing
         with pytest.raises(InvalidWorkflowError):
             # mass balance of 5 years beforehand not fully computed so should raise an error
-            mb_mod_1.get_annual_mb(h, year=2004, spinup=True)
+            mb_mod_1.get_annual_mb(h, year=2004, spinup=True, auto_spinup=False)
 
         # check if get_monthly_mb works
         m = 1
@@ -115,9 +158,11 @@ class Test_geodetic_sfc_type:
         mb_monthly_1 = mb_mod_1.get_monthly_mb(h, year=floatyear, spinup=True)
         # with spinup, want that the pd_mb_annual and bucket is reset, repeat the spinup
         # and then use this pd_bucket_state to get the monthly_mb
-        # (so we don't need to have float years between 1995 and 1999 in pd_monthly_mb if melt_f_update is annual)
-        assert np.shape(mb_mod_1.pd_mb_annual) == (len(mb_mod_1.fl.dis_on_line), 5)
-        assert np.all(mb_mod_1.pd_mb_annual.columns.values == np.arange(1995, 2000))
+        # (so we don't need to have float years between 1994 and 1999 in pd_monthly_mb if melt_f_update is annual)
+        assert np.shape(mb_mod_1.pd_mb_annual) == (len(mb_mod_1.fl.dis_on_line), 6)
+        #assert np.shape(mb_mod_1.pd_mb_monthly) == (len(mb_mod_1.fl.dis_on_line), 72)
+
+        assert np.all(mb_mod_1.pd_mb_annual.columns.values == np.arange(1994, 2000))
         assert np.all(mb_mod_1.pd_mb_monthly.columns == floatyear)
         assert np.any(mb_mod_1.pd_bucket >= 0)
 
@@ -136,7 +181,8 @@ class Test_geodetic_sfc_type:
         # try it with another month of the next year that doesn't follow the month from before
         # this should raise an error!!!
         with pytest.raises(InvalidWorkflowError):
-            mb_mod_1.get_monthly_mb(h, year=date_to_floatyear(year+1, 6), spinup=True)
+            mb_mod_1.get_monthly_mb(h, year=date_to_floatyear(year+1, 6), spinup=True,
+                                    auto_spinup=False)
 
 
         # check if specific mass balance equal?
@@ -193,10 +239,9 @@ class Test_geodetic_sfc_type:
 
         spec_1 = mb_mod_1.get_specific_mb(year=years, fls=fls, spinup=True)
         # now check if the pd_mb buckets are filled up
-        # if melt_f_update == annual (here), have len(years) + spinupyears as amount of columns
-        spinupyears = 5
+        # if melt_f_update == annual (here), have len(years) + spinup_yrs s as amount of columns
         assert np.shape(mb_mod_1.pd_mb_annual) == (len(mb_mod_1.fl.dis_on_line),
-                                                   len(years)+spinupyears)
+                                                   len(years)+ mb_mod_1.spinup_yrs)
         # no monthly update done (because only get_annual_mb here)
         assert np.shape(mb_mod_1.pd_mb_monthly) == (len(mb_mod_1.fl.dis_on_line), 0)
         assert np.any(mb_mod_1.pd_bucket >= 0)
@@ -260,6 +305,20 @@ class Test_geodetic_sfc_type:
         mb_annual_get_2008 = mb_mod_0_5.get_annual_mb(h, year=year_test)
         # test if similar
         assert_allclose(mb_annual_pd_2008, mb_annual_get_2008)
+
+        # let's test the auto-spinup
+        mb_mod_0_5.reset_pd_mb_bucket()
+        mb_mod_0_5.get_annual_mb(h, year = year_test)
+        # we have 6 spinup years (default)
+        assert np.all(mb_mod_0_5.pd_mb_annual.columns.values == np.arange(year_test - 6,
+                                                                          year_test + 1))
+        mb_mod_0_5.get_monthly_mb(h, year = date_to_floatyear(year_test, 5))
+        assert np.all(mb_mod_0_5.pd_mb_annual.columns.values == np.arange(year_test - 6,
+                                                                   year_test))
+        assert np.all(mb_mod_0_5.pd_mb_monthly.columns.values == np.array([date_to_floatyear(year_test, m)
+                                                           for m in np.arange(1,6,1)]))
+
+
 
     #@pytest.mark.skip(reason="slow, not important for sarah")
     @pytest.mark.slow
@@ -335,7 +394,7 @@ class Test_geodetic_sfc_type:
 
         # need to start in January
         year = 2000
-        for m in np.arange(1,13,1):
+        for m in np.arange(1, 13, 1):
             floatyear = date_to_floatyear(year, m)
 
             mb_monthly_1_m = mb_mod_monthly_1_m.get_monthly_mb(h, year=floatyear, spinup=True)
@@ -377,13 +436,26 @@ class Test_geodetic_sfc_type:
         assert_allclose(pd_sum_a, pd_sum_m, rtol=100) #
         #
         assert_allclose(annual_m / 12, annual_a / 12, atol=1e-8)
-        assert_allclose(annual_m/12, annual_a/12, rtol = 100)
+        assert_allclose(annual_m/12, annual_a/12, rtol=100)
         # then for the entire year!
         # just as a check:
+
+        # test if I can get the mass balance without doing something before
+        # and also check if most buckets are filled (from the spinup)
+        mb_mod_monthly_0_5_m.reset_pd_mb_bucket()
+        _, bucket = mb_mod_monthly_0_5_m.get_monthly_mb(h, year=date_to_floatyear(2002, 2),
+                                                        spinup=True,
+                                                        bucket_output=True)
+        # there should be less than 5  entries
+        len(bucket.columns[bucket.iloc[0] == 0]) < 5
+        # all spinup years (default is 6) should be there
+        assert np.all(mb_mod_monthly_0_5_m.pd_mb_annual.columns.values == np.arange(2002 - 6, 2002, 1))
+        #assert np.all(mb_mod_monthly_0_5_m.pd_mb_annual.columns.values==np.arange(2002-6, 2002+1, 1))
+
         mb_mod_monthly_1_m.reset_pd_mb_bucket()
         mb_mod_monthly_0_5_m.reset_pd_mb_bucket()
         mb_mod_annual_0_5_a.reset_pd_mb_bucket()
-        for year in np.arange(2000,2005,1):
+        for year in np.arange(2000, 2002, 1):
             mb_annual_1_m = mb_mod_monthly_1_m.get_annual_mb(h, year=year, spinup=True)
             mb_annual_no_sfc_type = mb_mod_no_sfc_type.get_annual_mb(h, year=year)
 
@@ -401,7 +473,6 @@ class Test_geodetic_sfc_type:
             #test_a = mb_mod_annual_0_5_a.pd_mb_annual[2000].values
             #mb_mod_annual_0_5_a.pd_mb_annual
             #mb_mod_annual_0_5_a.pd_mb_monthly[mb_mod_annual_0_5_a.pd_mb_monthly.columns[-12:]].mean()
-
 
             #assert_allclose(mb_annual_monthly_0_5_m, mb_annual_0_5_a, rtol=100)
             assert_allclose(np.average(mb_annual_monthly_0_5_m, weights=w),
@@ -778,7 +849,6 @@ class Test_directobs_hydro10:
             assert_allclose(tot_mb, tot_mb_default, rtol=1e-4)
 
     # I use here the exact same names as in test_models from OGGM.
-    # class TestInitPresentDayFlowline:
     # but somehow the test for ref_mb_profile() is not equal
     def test_present_time_glacier_massbalance(self, gdir):
 

@@ -2,7 +2,7 @@
 
 Next generation of OGGM's mass-balance models. Work in process!
 
-At the moment these options are available:
+At the moment these **options of climate resolution** are available inside `TIModel`:
 - to compute degree days:
     - using monthly temperatures ('mb_monthly'), default option in OGGM
     - using monthly temperatures and daily temp std to generate daily temp. assuming normal distributed data ('mb_pseudo_daily')
@@ -11,15 +11,36 @@ At the moment these options are available:
     - using a constant calibrated value independent of location and season (-6.5 K/km, grad_type: cte), default option in OGGM
     - using lapse rates from ERA5 that vary throughout the year and inbetween glacier locations, 
     but that are constant inbetween the years (grad_type: 'var_an_cycle')
-    - using lapse rates from ERA5 that vary throughout the year and inbetween glacier locations, 
-    different for each year (grad_type: 'var')
-    
- - sfc type distinction:
-    - TODO
+    - ( this has not been tested: using lapse rates from ERA5 that vary throughout the year and inbetween glacier locations, 
+    different for each year (grad_type: 'var') )
+
+In addition, a **surface type distinction model is included with a bucket system together with a melt_f that varies with age** inside of `TIModel_Sfc_Type`:
+- there are two options included at the moment:
+    - `melt_f_update=annual`
+        - If annual, then it uses 1 snow
+            and 5 firn buckets with yearly melt factor updates.
+    - `melt_f_update=monthly`:
+        -  If monthly, each month the snow is ageing over 6 years (i.e., 72 months -> 72 buckets).
+    - the ice bucket is thought as an "infinite" bucket (because we do not know the ice thickness at this model stage)
+    - Melt factors are interpolated linearly inbetween the buckets.
+      TODO: include non-linear melt factor change as an option!
+- default is to use a **spinup** of 5 years. So to compute the specific mass balance between 2000 and 2020, with `spinup=True`, the annual mb is computed since 1994 where at first everything is ice, and then it accumulates over the next years, so that in 2000 there is something in each bucket ...
+
+- the ratio of snow melt factor to ice melt factor is set to 0.5 (as in GloGEM, PyGEM, ...) but it can be changed via `melt_f_ratio_snow_to_ice`
+    - if we set `melt_f_ratio_snow_to_ice=1` the melt factor is equal for all buckets, hence the results are equal to no surface type distinction (as in `TIModel`)
+- `get_annual_mb` and `get_monthly_mb` work as in PastMassBalance, however they only accept the height array that corresponds to the inversion height (so no mass-balance elevation feedback can be included at the moment!)
+    - that means the given mass-balance ist the mass-balance over the inversion heights (before doing the inversion and so on)
+- the buckets are automatically updated when using `get_annual_mb` or `get_monthly_mb` via the `TIModel_Sfc_Type.pd_bucket` dataframe 
+- to make sure that we do not compute mass-balance twice and to always have a spin-up of 6 years, we save the mass balance under 
+    - `get_annual_mb.pd_mb_annual`: for each year
+        - when using `get_monthly_mb` for several years, after computing the December month, the `pd_mb_annual` dataframe is updated
+    - `get_annual_mb.pd_mb_monthly`: for each month
+        - note that this stays empty if we only use get_annual_mb with annual melt_f_update
+
 
 All options have been tested with the elevation flowline from Huss. 
 
-# How to install/use !
+# How to install!
 <!-- structure as in https://github.com/fmaussion/scispack and oggm/oggm -->
 the newest OGGM developer version has to be installed in order that MBsandbox works:
 e.g. do:
@@ -41,35 +62,41 @@ The MBsandbox package can be imported in python by
 
     >>> import MBsandbox
 
-A simple use case is explained in **docs/how_to_use.ipynb**. 
-
-
 # inside of MBsandbox
 
-- ***mbmod_daily_oneflowline.py***: process climate data, new mass-balance model TIModel_Parent with children, ...
-- ***flowline_TIModel.py***: copies of run_from_climate, run_random_climate that are compatible with TIModel  
-- ***help_func.py***: helper functions to minimize the bias, optimise std_quot, to calibrate the melt factor given
-      precipitation factor and geodetic observations, and to compute performance statistics
+- ***mbmod_daily_oneflowline.py***: 
+    - process different climate data (WFDE5_CRU, ERA5_daily, W5E5, W5E5_MSWEP(prcp from MSWEP, temp. from W5E5)),
+    - new mass-balance model `TIModel_Parent` with children `TIModel` and `TIModel_Sfc_Type`
+- ***flowline_TIModel.py***: copies of run_from_climate, run_random_climate that are compatible with `TIModel`, not yet tested for `TIModel_Sfc_Type`
+- ***help_func.py***: helper functions to minimize the bias, optimise standard deviation quotient for reference glaciers, to calibrate the melt factor given the precipitation factor and geodetic observations, and to compute performance statistics
 - **tests**: tests for different functions
 - *wip/...*: work in process folder without documentation
 
-# docs/*:
+# How to use!
+This is still work in process but there are some example notebooks with explanations: 
+- [docs/how_to_use.ipynb] : simple use case that shows how to use different climate resolutions
+- [docs/surface_type_distinction/oggm_sfc_type_bucket.ipynb] : use case of how the surface type distinction with different melt factors works
+    - inside of [docs/surface_type_distinction] there are some plots that show how the sfc type distinction and melt_f variation works
 
-### simple use case: ***how_to_use.ipynb***
+- [docs/how_to_daily_input_daily_output.ipynb] : how to get daily mb output and calibrate with geodetic data
 
-### how to get daily mb output and calibrate with geodetic data: ***how:to_daily_input_daily_output.ipynb***
+- [docs/hydro_compatility/hydro_compatibility_workflow.ipynb] : use case of how to use MBsandbox with run_with_hydro (works for W5E5, WFDE5_CRU and W5E5_MSWEP climate)
 
-### how to use MBsandbox with run_with_hydro ***hydro_compatility/hydro_compatibility_workflow.ipynb***
 
-### mass balance intercomparison with figures: ***intercomparison_w_figures/****
-- ***HEF_mb_type_intercomparison_oneflowline.ipynb***: shows mb type intercomparison for Hintereisferner
-    - plots in **figures_hef**
-- ***refglaciersAlps_mb_type_intercomparison_oneflowline.ipynb*** : shows intercomparison for Alpine reference glaciers
-  plots in:
-    - **figures_alps** (performance measures for Alpine reference glaciers)
-    - **figures_alps_indiv** (observed and modelled mb time series with performance measures for each Alpine reference glacier 
-    - stats_Alps_6mb_models_N_5000_with_mean_an_cycle.csv: dataset of optimal DDFs and performance measures for all Alpine glaciers and all mb types
-  
-### preprocess_ERA5_daily: this is just a side product
-- ***preprocess_ERA5_daily/cluster_aggregate_dailyERA5.ipynb***: how to preprocess the ERA5_daily files
+other notebooks not directly related to MBSandbox:
+- [docs/template_geodetic_MB_calibration.ipynb] : template how to calibrate a glacier by using the geodetic estimates (for the default `PastMassBalanceModel` of OGGM )
+
+- [docs/preprocess_ERA5_daily/cluster_aggregate_dailyERA5.ipynb] : how to preprocess the ERA5_daily files
   (end product is here: https://cluster.klima.uni-bremen.de/~oggm/climate/era5/daily/v1.0/)
+    - other preprocess / flattening workflows (for ISIMIP3a/3b, WFDE5, W5E5, MSWEP) are on the cluster (todo: upload them...?)
+
+
+*need to check if the following notebooks still work*:
+- [docs/intercomparison_w_figures/HEF_mb_type_intercomparison_oneflowline.ipynb] : shows mb type intercomparison for Hintereisferner
+    - plots in [docs/intercomparison_w_figures/figures_hef]
+- [docs/intercomparison_w_figures/refglaciersAlps_mb_type_intercomparison_oneflowline.ipynb] : shows intercomparison for Alpine reference glaciers
+  plots in:
+    - [docs/intercomparison_w_figures/figures_alps] (performance measures for Alpine reference glaciers)
+    - [docs/intercomparison_w_figures/figures_alps_indiv] (observed and modelled mb time series with performance measures for each Alpine reference glacier 
+    - [docs/intercomparison_w_figures/stats_Alps_6mb_models_N_5000_with_mean_an_cycle.csv] : dataset of optimal DDFs and performance measures for all Alpine glaciers and all mb types
+  
