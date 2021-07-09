@@ -1699,25 +1699,32 @@ class TIModel_Sfc_Type(TIModel_Parent):
     def __init__(self, gdir, melt_f,
                  melt_f_ratio_snow_to_ice=0.5,
                  melt_f_update='annual',
+                 spinup_yrs=6,
                  **kwargs):
 
         '''
-        TIModel with surface type distinction
+        TIModel with surface type distinction using a bucket system
 
         ... work in process ...
         Parameters
         ----------
-        gdir TODO
-        melt_f :
         melt_f_ratio_snow_to_ice
             ratio of snow melt factor to ice melt factor,
             default is 0.5 same as in GloGEM, PyGEM ...
         melt_f_update : str, default: 'annual'
-            'annual' or 'monthly' (daily in future?): how
+            'annual' or 'monthly' (daily in future?), how
             often the melt factor should be updated and how
             many buckets exist. If annual, then it uses 1 snow
-            and 5 firn buckets with yearls updates. If monthly,
-            each month the snow is ageing ...
+            and 5 firn buckets with yearly melt factor updates. If monthly,
+            each month the snow is ageing over 6 years (i.e., 72 months).
+            Melt factors are interpolated linearly inbetween the buckets.
+            TODO: include non-linear melt factor change!
+        spinup_yrs : int
+            amount of years to compute as spinup (if spinup=True in
+            get_annual_mb or get_monthly_mb) before computing the actual year.
+            Default is 6 years. After these 6 years every bucket has the opportunity
+            to be filled (as we have 1 snow bucket and 5 firn buckets, or
+            72 monthly buckets)
         kwargs
         '''
         super().__init__(gdir, melt_f, **kwargs)
@@ -1725,6 +1732,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # ratio of snow melt_f to ice melt_f
         self.melt_f_ratio_snow_to_ice = melt_f_ratio_snow_to_ice
         self.melt_f_update = melt_f_update
+        self.spinup_yrs = spinup_yrs
         if self.melt_f_update == 'annual':
             self.buckets = ['snow', 'firn_yr_1', 'firn_yr_2', 'firn_yr_3',
                             'firn_yr_4', 'firn_yr_5']
@@ -1740,6 +1748,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
 
         # only have one flowline when using elevation bands
         self.fl = gdir.read_pickle('inversion_flowlines')[-1]
+        # save the inversion height to later check if the same height is applied!!!
+        self.inv_heights = self.fl.surface_h
 
         # container template
         # use the distance_along_flowline as index
@@ -1766,10 +1776,9 @@ class TIModel_Sfc_Type(TIModel_Parent):
         self.pd_bucket = pd_bucket
 
     def reset_pd_mb_bucket(self):
-        ''' resets pandas mass balance monthly and annual dataframe as well as the bucket dataframe
-
+        """ resets pandas mass balance monthly and annual dataframe as well as the bucket dataframe
         is called when setting new melt_f, prcp_fac, temp_bias, ...
-        '''
+        """
         #TODO: do I need to reset sometimes only the buckets, or only mb_monthly???
         self.pd_mb_monthly = self._pd_mb_template.copy()
         self.pd_mb_annual = self._pd_mb_template.copy()
@@ -1791,6 +1800,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
 
          Parameters
          ----
+         heights: np.array()
+            heights of elevation flowline, at the monent only inversion height works!!!
          year: int or float
             if melt_f_update=='monthly', year should be a hydro float year,
             so it corresponds to 1 month of a specific year
@@ -1798,7 +1809,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
             if melt_f_update -> climate_resol has to be always monthly
             but if annual melt_f_update can have either annual climate resol (if get_annual_mb is used)
             or monthly climate resol (if get_monthly_mb is used)
-
 
          """
         # problem: @Fabi if I put heights inside that are not fitting to
@@ -1956,12 +1966,9 @@ class TIModel_Sfc_Type(TIModel_Parent):
 
     # @update_buckets.setter ### should this be a setter ??? because no argument ...
     def _update(self):
-        ''' this is called by get_annual_mb or get_monthly_mb after one year/one month to update
-        the buckets as they got older
+        """ this is called by get_annual_mb or get_monthly_mb after one year/one month to update
+        the buckets as they got older """
 
-        '''
-        # TODO: need to write a test with a test pd_bucket that checks if the right
-        #  updates are done ...
         if np.any(np.isnan(self.pd_bucket['delta_kg/m2'])):
             raise InvalidWorkflowError('the buckets have been updated already, need'
                                        'to add_delta_mb first')
@@ -1987,42 +1994,52 @@ class TIModel_Sfc_Type(TIModel_Parent):
 
     def get_annual_mb(self, heights, year=None, unit='m_of_ice',
                       bucket_output=False, spinup=True,
-                      add_climate=False, reset=False,
+                      add_climate=False,
+                      auto_spinup=True,
                       **kwargs):
-        '''
+        """
         computes annual mass balance in m of ice per second
 
         Parameters
         ----------
-        heights
+        heights : np.array
+            at the moment only works with inversion heights!
         year: int
             integer year ! if melt_f_update='monthly', will loop over each month
-        unit
-        bucket_output: if True, also returns pd.Dataframe with the buckets
-        (they are not yet updated for the next year!)
-        add_climate:
-        kwargs
+        unit : str
+            default is 'm of ice', nothing else implemented at the moment!
+            TODO: include option of metre of glacier where the different densities
+            are taken into account but in this case would need to add further columns in pd_buckets
+            like: snow_delta_kg/m2 ... and so on
+        bucket_output: bool (default is False)
+            if True, also returns pd.Dataframe with the buckets
+            which are not yet updated for the next year!
+        add_climate: bool (default is False)
+            for run_with_hydro (not yet implemented!)
+            todo: implement and test it
+        auto_spinup: bool (default is true)
+            if True, it automatically computes the 5 years beforehand (however in this case,
+            these 5 years, although saved in pd_mb_annual, had no spinup...)
+            todo: maybe need to add a '_no_spinup' to those that had no spinup?
+            or save them in a separate pd.DataFrame?
+        **kwargs:
+            other stuff passed to get_monthly_mb or to _add_delta_mb_vary_melt_f
+            **kwargs necessary to take stuff we don't use (like fls...)
 
-        Returns
-        -------
-
-        '''
-        # default output is m of ice per second (same as in the get_annual_mb)
-        # TODO: include option of metre of glacier where the different densities
-        #  are taken into account ...
-        # but in this case would need to add further columns in pd_buckets
-        # like: snow_delta_kg/m2 ... and so on
-        # **kwargs necessary to take stuff we don't use (like fls...)
+        """
 
         # we just convert to integer without checking ...
         # if not isinstance(year, int):
         #    raise InvalidParamsError('Year has to be the full year for get_annual_mb,'
         #                             'year needs to be an integer')
+        np.testing.assert_allclose(heights, self.inv_heights,
+                                   err_msg='the heights should correspond to the inversion heights',
+                                   )
         year = int(year)
 
-        if year in self.pd_mb_annual.columns and reset == False:
+        if year in self.pd_mb_annual.columns:
             # if that year has already been computed
-            # just get the monthly_mb
+            # just get the annual_mb
             # (but don't need to compute something or update pd_buckets)
             mb_annual = self.pd_mb_annual[year].values
             if bucket_output:
@@ -2030,21 +2047,37 @@ class TIModel_Sfc_Type(TIModel_Parent):
                                            'reset_pd_mb_bucket() and rerun')
             return mb_annual
         else:
-            if year == 2000 and spinup:
+            if self.melt_f_update == 'annual':
+                condi = int(year - self.spinup_yrs) not in self.pd_mb_annual.columns
+            elif self.melt_f_update == 'monthly':
+                try:
+                    #condi = ([date_to_floatyear(year-5, m) for m in np.arange(1, 13, 1)] not in
+                    #        self.pd_mb_monthly.columns)
+                    # check if first month exists
+                    condi = date_to_floatyear(year - self.spinup_yrs, 1) not in self.pd_mb_monthly.columns
+                except:
+                    condi = True
+            if condi and spinup and auto_spinup:
                 # if the spinup is run already, year would be in pd_mb_annual ...
                 # I think we should always reset when
                 # doing the spinup and not having computed year==2000
+                # problem: the years before year should not be saved up (in get_annual_mb)!
+                # (because they are not computed right!!! (they don't have a spinup)
                 self.reset_pd_mb_bucket()
-                for yr in np.arange(1995, 2000):
+                for yr in np.arange(year-self.spinup_yrs, year):
                     self.get_annual_mb(heights, year=yr, unit=unit, bucket_output=False,
-                                       spinup=False, add_climate=False, **kwargs)
+                                           spinup=False, add_climate=False,
+                                            auto_spinup=False,
+                                           **kwargs
+                                       )
 
             if spinup:
                 # check if the years before that had been computed
-                # (if 2000, it should have been computed above)
+                # (it should have been computed above if auto_spinup=True)
                 for bef in np.arange(1, 6, 1):
                     if int(year-bef) not in self.pd_mb_annual.columns:
-                        raise InvalidWorkflowError('need to do get_annual_mb of all 5 years beforehand')
+                        raise InvalidWorkflowError('need to do get_annual_mb of all spinup years'
+                                                   '(default is 6) beforehand')
             if self.melt_f_update == 'annual':
                 self.pd_bucket = self._add_delta_mb_vary_melt_f(heights, year=year,
                                                                 climate_resol='annual')
@@ -2061,7 +2094,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
             elif self.melt_f_update == 'monthly':
                 # will be summed up over each month by getting pd_mb_annual
                 # that is set in december (month=12)
-                # mb_annual = np.full(len(self.pd_bucket), 0.0)  # need float
                 for m in np.arange(1, 13, 1):
                     floatyear = date_to_floatyear(year, m)
                     # OLD:
@@ -2072,12 +2104,12 @@ class TIModel_Sfc_Type(TIModel_Parent):
                     # let the buckets "age" one month
                     # self._update()
                     # instead use get_monthly_mb()
-                    # is spinup False for 1995 ...
                     out = self.get_monthly_mb(heights, year=floatyear, unit=unit,
                                         bucket_output=bucket_output, spinup=spinup,
-                                        add_climate=add_climate, reset=reset,
+                                        add_climate=add_climate,
+                                        auto_spinup = auto_spinup,
                                         **kwargs)
-                    if bucket_output and m==12:
+                    if bucket_output and m == 12:
                         pd_bucket = out[1]
                 # get mb_annual that is produced by
                 mb_annual = self.pd_mb_annual[year]
@@ -2092,25 +2124,53 @@ class TIModel_Sfc_Type(TIModel_Parent):
             #            prcp.sum(axis=1), prcpsol.sum(axis=1))
 
     def get_monthly_mb(self, heights, year=None, unit='m_of_ice',
-                      bucket_output=False, spinup=True,
-                      add_climate=False, reset=False,
-                      **kwargs):
-        """ TODO WIP !!!!!!!
-        computes annual mass balance in m of ice per second!
+                       bucket_output=False, spinup=True,
+                       add_climate=False,
+                       auto_spinup=True,
+                       **kwargs):
+        """
+        computes monthly mass balance in m of ice per second!
 
         year should be the hydro float year,
         so it corresponds to 1 month of a specific year
 
-        year has to be given as float hydro year from what the month is taken,
-        hence year 2000 -> y=2000, m = 1, & year = 2000.09, y=2000, m=2 ...
-        which corresponds to the real year 1999 an months October or November
-        if hydro year starts in October
-        """
-        # conditions to not compute again the mass-balance
-        # year in self.pd_mb_monthly.columns
+        Parameters
+        ----------
+        heights : np.array
+            at the moment only works with inversion heights!
+        year: int
+            year has to be given as hydro float year from what the (integer) year and month is taken,
+            hence year 2000 -> y=2000, m = 1, & year = 2000.09, y=2000, m=2 ...
+            which corresponds to the real year 1999 and months October or November
+            if hydro year starts in October
+        unit : str
+            default is 'm of ice', nothing else implemented at the moment!
+            TODO: include option of metre of glacier where the different densities
+            are taken into account but in this case would need to add further columns in pd_buckets
+            like: snow_delta_kg/m2 ... and so on
+        bucket_output: bool (default is False)
+            if True, returns as second output the pd.Dataframe with the buckets
+            which are not yet updated for the next month!
+        add_climate: bool (default is False)
+            for run_with_hydro (not yet implemented!)
+            todo: implement and test it
+        auto_spinup: bool (default is true)
+            if True, it automatically computes the spinup years (default is 6) beforehand and
+            all months before the existing year
+            (however in this case, these spinup years, although saved in pd_mb_annual, had no spinup...)
+            todo: maybe need to add a '_no_spinup' to those that had no spinup?
+            or save them in a separate pd.DataFrame?
+        **kwargs:
+            other stuff passed to get_annual_mb or to _add_delta_mb_vary_melt_f
+            todo: not yet necessary, maybe later? **kwargs necessary to take stuff we don't use (like fls...)
 
-        if year in self.pd_mb_monthly.columns and reset == False:
-            # if that year has already been computed
+        """
+        np.testing.assert_allclose(heights, self.inv_heights,
+                                   err_msg='the heights should correspond to the inversion heights',
+                                   )
+
+        if year in self.pd_mb_monthly.columns:
+            # if that float year has already been computed
             # just get the monthly_mb
             # (but don't need to compute something or update pd_buckets)
             mb_month = self.pd_mb_monthly[year].values
@@ -2129,26 +2189,52 @@ class TIModel_Sfc_Type(TIModel_Parent):
             y, m = floatyear_to_date(year)
 
             # spinup
-            if y == 2000 and spinup and m == 1:
+            # this is independent of melt_f_update, always need to reset if the spinup years before
+            # were not computed
+            try:
+                # it is sufficient to check if the first month is there
+                # if there is any other problem it will raise an error later anyways
+                condi = date_to_floatyear(y - self.spinup_yrs, 1) not in self.pd_mb_monthly.columns
+            except:
+                condi = True
+            # if annual melt_f_update and annual_mb exists from previous years
+            # (by doing , get_annual_mb), and there exist not yet the mass-balance for the next year
+            # then no reset & new spinup is necessary
+            condi_add = int(y + 1) in self.pd_mb_annual.columns
+            if self.melt_f_update == 'annual' and condi_add:
+                condi = condi_add
+
+            if condi and spinup and auto_spinup:
                 # if the spinup is run already, year would be in pd_mb_annual ...
                 # I think we should always reset when
                 # doing the spinup and not having computed year==2000
                 self.reset_pd_mb_bucket()
-                for yr in np.arange(1995, 2000):
+                for yr in np.arange(y-self.spinup_yrs, y):
                     self.get_annual_mb(heights, year=yr, unit=unit, bucket_output=False,
-                                       spinup=False, add_climate=False, **kwargs)
+                                       spinup=False, add_climate=False,
+                                       auto_spinup=False, **kwargs)
+                # need to also run the months before m
+                if m > 1:
+                    for mb in np.arange(1, m, 1):
+                        floatyear_before = date_to_floatyear(y, mb)
+                        self.get_monthly_mb(heights, year=floatyear_before,
+                                            bucket_output=False,
+                                            spinup=False, add_climate=False,
+                                            auto_spinup=False, **kwargs)
 
             if spinup:
                 # check if the years before that had been computed
                 # (if 2000, it should have been computed above)
                 for bef in np.arange(1, 6, 1):
                     if int(y-bef) not in self.pd_mb_annual.columns:
-                        raise InvalidWorkflowError('need to do get_monthly_mb of all 5 years beforehand')
+                        raise InvalidWorkflowError('need to do get_monthly_mb of all spinup years '
+                                                   '(default is 6) beforehand')
                 # check if the months before had been computed for that year?
                 for mb in np.arange(1, m, 1):
                    floatyear_before = date_to_floatyear(y, mb)
                    if floatyear_before not in self.pd_mb_monthly.columns:
-                       raise InvalidWorkflowError('need to get_monthly_mb of each month of that year beforehand')
+                       raise InvalidWorkflowError('need to get_monthly_mb of each month '
+                                                  'of that year beforehand')
 
             if self.melt_f_update == 'annual':
                 # raise NotImplementedError('get_monthly_mb works at the moment '
@@ -2199,7 +2285,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
                 mb_month -= self.residual * self.SEC_IN_MONTH / self.SEC_IN_YEAR
                 # flattening for mb_pseudo_daily otherwise it gives the wrong shape
                 mb_month = mb_month.flatten() / self.SEC_IN_MONTH / self.rho
-                #if add_climate:
+                #todo: if add_climate:
                 #    if self.mb_type == 'mb_real_daily':
                 #        # for run_with_hydro want to get monthly output (sum of daily),
                 #        # if we want daily output in run_with_hydro, then we need another option here
@@ -2209,6 +2295,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
                 #    return (mb_month / SEC_IN_MONTH / self.rho, t, temp2dformelt,
                 #            prcp, prcpsol)
                 # instead of SEC_IN_MONTH, use instead len(prcpsol.T)==daysinmonth ???
+
+                # get the ouput before the update
                 if bucket_output:
                     pd_bucket = self.pd_bucket.copy()
                 # need to update it after each month
@@ -2236,13 +2324,11 @@ class TIModel_Sfc_Type(TIModel_Parent):
         raise NotImplementedError('this has to be implemented ... ')
 
 
-
 # copy of MultipleFlowlineMassBalance that works with TIModel
 class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
     """ Adapted MultipleFlowlineMassBalance that is compatible for all TIModel classes
 
-    TODO: do documentation
-
+    TODO: do better documentation
 
     Handle mass-balance at the glacier level instead of flowline level.
 
