@@ -1716,7 +1716,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
             often the melt factor should be updated and how
             many buckets exist. If annual, then it uses 1 snow
             and 5 firn buckets with yearly melt factor updates. If monthly,
-            each month the snow is ageing over 6 years (i.e., 72 months).
+            each month the snow is ageing over the amount of spinup years
+            (default 6yrs, i.e., 72 months).
             Melt factors are interpolated linearly inbetween the buckets.
             TODO: include non-linear melt factor change!
         spinup_yrs : int
