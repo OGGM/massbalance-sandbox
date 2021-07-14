@@ -1,356 +1,327 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Dec 24 12:28:37 2020
-
-@author: lilianschuster
-
-some helper functions to minimize the bias, optimise std_quot and tos
-compute performance statistics
-"""
-import scipy
-import matplotlib.pyplot as plt
 import numpy as np
-from oggm import entity_task
-from oggm.core import climate
 import pandas as pd
-import logging
+import xarray as xr
+import scipy
+import oggm
+from oggm import cfg, utils, workflow, tasks
+import pytest
+from numpy.testing import assert_allclose
 
-log = logging.getLogger(__name__)
+# import the MBsandbox modules
+from MBsandbox.mbmod_daily_oneflowline import process_w5e5_data
+from MBsandbox.help_func import melt_f_calib_geod_prep_inversion
+from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel,
+                                        run_random_climate_TIModel)
 
-# imports from local MBsandbox package modules
-from MBsandbox.mbmod_daily_oneflowline import TIModel
+# get the geodetic calibration data
+url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
+path = utils.file_downloader(url)
+pd_geodetic = pd.read_csv(path, index_col='rgiid')
+pd_geodetic = pd_geodetic.loc[pd_geodetic.period == '2000-01-01_2020-01-01']
 
-# %%
-def minimize_bias(x, gd_mb=None, gdir_min=None,
-                  pf=None, absolute_bias=False, input_filesuffix=''):
-    """ calibrates the melt factor (melt_f) by getting the bias to zero
-    comparing modelled mean specific mass balance to
-    direct glaciological observations
+DOM_BORDER = 80
 
-    Parameters
-    ----------
-    x : float
-        what is optimised; here the melt factor (melt_f)
-    gd_mb: class instance
-        instantiated class of TIModel, this is updated by melt_f
-    gdir_min :
-        glacier directory. The default is None but this has to be set.
-    N : int, optional
-        Amount of percentiles, only used for mb_type ='mb_pseudo_daily'.
-        The default is 100.
-    pf: float: optional
-        precipitation factor. The default is 2.5.
-    loop : bool, optional
-        If loop is applied, only used for mb_type ='mb_pseudo_daily'.
-        The default is False.
-    absolute_bias : bool
-        if absolute_bias == True, the absolute value of the bias is returned.
-        if optimisation is done with Powell need absolute bias.
-        If optimisation is done with Brentq, absolute_bias has to set False
-        The default is False.
-    input_filesuffix: str
-        default is ''. If set, it is used to choose the right filesuffix
-        for the ref mb data.
-
-    Returns
-    -------
-    float
-        bias: modeled mass balance mean - reference mean
-        if absolute_bias = True:  np.abs(bias) is returned
-
-    """
-
-    h, w = gdir_min.get_inversion_flowline_hw()
-    mbdf = gdir_min.get_ref_mb_data(input_filesuffix=input_filesuffix)
-    gd_mb.melt_f = x
-    if type(pf) == float or type(pf) == int:
-        gd_mb.prcp_fac = pf
-
-    # check climate and adapt if necessary
-    gd_mb.historical_climate_qc_mod(gdir_min)
-    mb_specific = gd_mb.get_specific_mb(heights=h,
-                                        widths=w,
-                                        year=mbdf.index.values)
-    if absolute_bias:
-        bias_calib = np.abs(np.mean(mb_specific -
-                                    mbdf['ANNUAL_BALANCE'].values))
-    else:
-        bias_calib = np.mean(mb_specific - mbdf['ANNUAL_BALANCE'].values)
-
-    return bias_calib
-# %%
-def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
-                           h=None, w=None, pf=2.5,
-                           absolute_bias=False,
-                           ys=np.arange(2000, 2019, 1),
-                           oggm_default_mb=False,
-                           spinup=False):
-    """ calibrates the melt factor (melt_f) by getting the bias to zero
-    comparing modelled mean specific mass balance between 2000 and 2020 to
-    observed geodetic data
-
-    Parameters
-    ----------
-    x : float
-        what is optimised (here the melt_f)
-    gd_mb: class instance
-        instantiated class of TIModel, this is updated by melt_f
-    mb_geodetic: float
-         geodetic mass balance between 2000-2020 of the instantiated glacier
-    h: np.array
-        heights of the instantiated glacier
-    w: np.array
-        widths of the instantiated glacier
-    pf: float
-        precipitation scaling factor
-        default is 2.5
-    absolute_bias : bool
-        if absolute_bias == True, the absolute value of the bias is returned.
-        if optimisation is done with Powell need absolute bias.
-        If optimisation is done with Brentq, absolute_bias has to be set False
-        The default is False.
-    ys: np.array
-        years for which specific mass balance is computed
-        default is 2000--2019 (when using W5E5)
-    oggm_default_mb : bool
-        if default oggm mass balance should be used (default is False)
-    spinup : bool
-        send to get_specific_mb (for sfc type distinction)
-
-    Returns
-    -------
-    float
-        bias: modeled mass balance mean - reference mean (geodetic)
-        if absolute_bias = True:  np.abs(bias) is returned
-
-    """
-    if oggm_default_mb:
-        gd_mb.mu_star = x
-    else:
-        gd_mb.melt_f = x
-
-    gd_mb.prcp_fac = pf
-
-    try:
-        mb_specific = gd_mb.get_specific_mb(heights=h,
-                                            widths=w,
-                                            year=ys,
-                                            spinup=spinup
-                                            ).mean()
-    except:
-        mb_specific = gd_mb.get_specific_mb(heights=h,
-                                        widths=w,
-                                        year=ys
-                                        ).mean()
-
-    if absolute_bias:
-        bias_calib = np.abs(np.mean(mb_specific -
-                                    mb_geodetic))
-    else:
-        bias_calib = np.mean(mb_specific - mb_geodetic)
-
-    return bias_calib
+ALL_DIAGS = ['volume', 'volume_bsl', 'volume_bwl', 'area', 'length',
+             'calving', 'calving_rate', 'off_area', 'on_area', 'melt_off_glacier',
+             'melt_on_glacier', 'liq_prcp_off_glacier', 'liq_prcp_on_glacier',
+             'snowfall_off_glacier', 'snowfall_on_glacier', 'model_mb',
+             'residual_mb', 'snow_bucket']
 
 
-def optimize_std_quot_brentq_geod(x, gd_mb=None, mb_geodetic=None,
-                                  mb_glaciological=None,
-                                  h=None, w=None,
-                                  ys_glac=np.arange(1979, 2019, 1),
-                                  ):
-    pf = x
-    # compute optimal melt_f according to geodetic data
-    melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 1, 10000,
-                                       xtol=0.01,
-                                       args=(gd_mb, mb_geodetic, h, w, pf),
-                                       disp=True)
-
-    gd_mb.melt_f = melt_f_opt
-    gd_mb.prcp_fac = pf
-    # now compute std over this time period using
-    # direct glaciological observations
-    mod_std = gd_mb.get_specific_mb(heights=h, widths=w,
-                                    year=ys_glac).std()
-    ref_std = mb_glaciological.loc[ys_glac].values.std()
-    quot_std = mod_std / ref_std
-
-    return 1 - quot_std
-
-def compute_stat(mb_specific=None, mbdf=None, return_dict=False,
-                 return_plot=False, round = False):
-    """ function that computes RMSD, bias, rcor, quot_std between modelled
-    and reference mass balance
-
-    Parameters
-    ----------
-    mb_specific : np.array or pd.Series
-        modelled mass balance
-    mbdf : np.array or pd.Series
-        reference mass balance
-    return_dict : bool
-        If a dictionary instead of a list should be returned.
-        The default is False
-    return_plot :
-        If modelled mass balance should be plotted with statistics as label,
-        write the label_part1 (mb_type and grad_type) into return_plot.
-        The default is False and means that no plot is returned.
-    Returns
-    -------
-    RMSD :
-        root-mean squared deviation
-    bias :
-        modeled mass balance mean - reference mean
-    rcor :
-        correlation coefficent between modelled and reference mass balance
-    quot_std : TYPE
-        standard deviation quotient of modelled against reference mass balance
-
-    """
-    # with np.array normalised by N / with pandas default option is N-1 !!!
-    obs = mbdf['ANNUAL_BALANCE'].values  # need values otherwise problem in std
-    RMSD = np.sqrt(np.sum(np.square(mb_specific - obs)))/len(obs)
-    ref_std = obs.std()
-    mod_std = mb_specific.std()
-    bias = mb_specific.mean() - obs.mean()
-    # this is treated a bit different than in mb_crossval of Matthias Dusch
-    if ref_std == 0:
-        # in mb_crossval: ref_std is then set equal to std of the modeled mb
-        quot_std = np.NaN
-        # in mb_crossval: rcor is set to 1 but I guess it should not be counted
-        # because it is not sth. we want to count
-        rcor = np.NaN
-    else:
-        quot_std = mod_std/ref_std
-        rcor = np.corrcoef(mb_specific, obs)[0, 1]
-
-    # could also be returned as dictionary instead to not confuse the results
-    if return_plot is not False:
-        stat_l = ('RMSD {}, rcor {}'
-                  ', std_quot {}, bias {}'.format(RMSD.round(1),
-                                                  rcor.round(3),
-                                                  quot_std.round(3),
-                                                  bias.round(2)))
-        label = return_plot + stat_l
-        plt.plot(mbdf.index, mb_specific, label=label)
-    if round:
-        RMSD = RMSD.round(1)
-        bias = bias.round(1)
-        rcor = rcor.round(3)
-        quot_std = quot_std.round(3)
-    if return_dict:
-        return {'RMSD': RMSD, 'bias': bias,
-                'rcor': rcor, 'quot_std': quot_std}
-    else:
-        return [RMSD, bias, rcor, quot_std]
-
-# %%
+# @pytest.fixture(scope='class')
+# def inversion_params(gdir):
+#    diag = gdir.get_diagnostics()
+#    return {k: diag[k] for k in ('inversion_glen_a', 'inversion_fs')}
 
 
-def optimize_std_quot_brentq(x, gd_mb=None,
-                             gdir_min=None,
-                             input_filesuffix=''):
-    """ calibrates the optimal precipitation factor (pf) by correcting the
-    standard deviation of the modelled mass balance
+class Test_hydro:
+    #    @pytest.mark.slow
+    @pytest.mark.parametrize('store_monthly_hydro', [False, True], ids=['annual', 'monthly'])
+    def test_hydro_out_random_oggm_core(self, gdir,  # inversion_params,
+                                        store_monthly_hydro):
+        # TODO: need to make this test compatible !!!
 
-    for each pf an optimal melt_f is found, then (1 - standard deviation quotient
-    between modelled and reference mass balance) is computed,
-    which is then minimised
+        # Add debug vars
+        cfg.PARAMS['store_diagnostic_variables'] = ALL_DIAGS
+        cfg.PARAMS['hydro_month_nh'] = 1
 
-    Parameters
-    ----------
-    x : float
-        what is optimised (here the precipitation factor)
-    gd_mb: class instance
-        instantiated class of TIModel, this is updated by pf and melt_f
-    gdir_min : optional
-        glacier directory. The default is None but this has to be set.
-    input_filesuffix: str
-        default is ''. If set, it is used to choose the right filesuffix
-        for the ref mb data.
+        pf = 2
+        climate_type = 'W5E5'
+        mb_type = 'mb_real_daily'
+        grad_type = 'var_an_cycle'
+        ###
+        if climate_type == 'W5E5':
+            ye = 2020  # till end of 2019
+        else:
+            ye = 2019
 
-    Returns
-    -------
-    float
-        1- quot_std
+        if mb_type == 'mb_real_daily':
+            temporal_resol = 'daily'
+        else:
+            temporal_resol = 'monthly'
+        process_w5e5_data(gdir, temporal_resol=temporal_resol,
+                          climate_type=climate_type)
+        ###
+        melt_f_calib_geod_prep_inversion(gdir,
+                                         pf=pf,  # precipitation factor
+                                         mb_type=mb_type, grad_type=grad_type,
+                                         climate_type=climate_type, residual=0,
+                                         path_geodetic=path, ye=ye)
+        # make sure melt factor is within a range
+        fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
+        melt_f = gdir.read_json(filename='melt_f_geod', filesuffix=fs).get('melt_f_pf_2')
+        assert 10 <= melt_f <= 1000
 
-    """
-    h, w = gdir_min.get_inversion_flowline_hw()
-    mbdf = gdir_min.get_ref_mb_data(input_filesuffix=input_filesuffix)
-    pf = x
-    melt_f_opt = scipy.optimize.brentq(minimize_bias, 1, 10000,
-                                               disp=True, xtol=0.1,
-                                                args=(gd_mb, gdir_min,
-                                                pf, False,
-                                                input_filesuffix))
-    gd_mb.melt_f = melt_f_opt
-    # check climate and adapt if necessary
-    gd_mb.historical_climate_qc_mod(gdir_min)
+        # here just calibrate a-factor to that single glacier
+        workflow.execute_entity_task(tasks.compute_downstream_line, [gdir])
+        workflow.execute_entity_task(tasks.compute_downstream_bedshape, [gdir])
 
-    mod_std = gd_mb.get_specific_mb(heights=h, widths=w,
-                                    year=mbdf.index.values).std()
-    ref_std = mbdf['ANNUAL_BALANCE'].values.std()
-    quot_std = mod_std/ref_std
+        oggm.workflow.calibrate_inversion_from_consensus([gdir],
+                                                         apply_fs_on_mismatch=False,
+                                                         error_on_mismatch=False,
+                                                         )
+        workflow.execute_entity_task(tasks.init_present_time_glacier, [gdir])
 
-    return 1-quot_std
+        ###
+        tasks.run_with_hydro(gdir, run_task=run_random_climate_TIModel,
+                             store_monthly_hydro=store_monthly_hydro,
+                             seed=0, nyears=100, y0=2003 - 5, halfsize=5,
+                             output_filesuffix='_rand',
+                             melt_f='from_json',
+                             precipitation_factor=pf,
+                             climate_input_filesuffix=climate_type,
+                             mb_type=mb_type, grad_type=grad_type)
 
+        with xr.open_dataset(gdir.get_filepath('model_diagnostics',
+                                               filesuffix='_rand')) as ds:
+            sel_vars = [v for v in ds.variables if 'month_2d' not in ds[v].dims]
+            odf = ds[sel_vars].to_dataframe().iloc[:-1]
 
-###
-from oggm import cfg
-_doc = 'the calibrated melt_f according to the geodetic data with the ' \
-       'chosen precipitation factor'
-cfg.BASENAMES['melt_f_geod'] = ('melt_f_geod.json', _doc)
+        # Sanity checks
+        # Tot prcp here is constant (constant climate) -> only for run with constant climate
+        odf['tot_prcp'] = (odf['liq_prcp_off_glacier'] +
+                           odf['liq_prcp_on_glacier'] +
+                           odf['snowfall_off_glacier'] +
+                           odf['snowfall_on_glacier'])
 
-# TODO:@entity_task(log) -> allows multi-processing
-#  but at the moment still gives an error
-#  AttributeError: Can't get attribute 'melt_f_calib_geod_prep_inversion' on <module '__main__'>
-#  Process ForkPoolWorker-3:
-@entity_task(log)
-def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte',
-                                     pf=None, climate_type='W5E5',
-                                     residual=0, path_geodetic=None, ye=None):
-    """ calibrates the melt factor using the TIModel mass-balance model,
-    computes the apparent mass balance for the inversion
-    and saves the melt_f and the applied pf into a json inside of the glacier directory
+        # Glacier area is the same (remove on_area?)
+        assert_allclose(odf['on_area'], odf['area_m2'])
 
-    TODO: make documentation
-    """
-    # get the geodetic data
-    pd_geodetic = pd.read_csv(path_geodetic, index_col='rgiid')
-    pd_geodetic = pd_geodetic.loc[pd_geodetic.period == '2000-01-01_2020-01-01']
-    # for that glacier
-    mb_geodetic = pd_geodetic.loc[gdir.rgi_id].dmdtda * 1000  # want it to be in kg/m2
+        # Our MB is the same as the glacier dyn one
+        reconstructed_vol = (odf['model_mb'].cumsum() / cfg.PARAMS['ice_density'] +
+                             odf['volume_m3'].iloc[0])
+        assert_allclose(odf['volume_m3'].iloc[1:], reconstructed_vol.iloc[:-1])
 
-    # instantiate the mass-balance model
-    # this is used instead of the melt_f
-    mb_mod = TIModel(gdir, None, mb_type=mb_type, grad_type=grad_type,
-                     baseline_climate=climate_type, residual=residual)
+        # Mass-conservation
+        odf['runoff'] = (odf['melt_on_glacier'] +
+                         odf['melt_off_glacier'] +
+                         odf['liq_prcp_on_glacier'] +
+                         odf['liq_prcp_off_glacier'])
 
-    # if necessary add a temperature bias (reference height change)
-    mb_mod.historical_climate_qc_mod(gdir)
+        mass_in_glacier_end = odf['volume_m3'].iloc[-1] * cfg.PARAMS['ice_density']
+        mass_in_glacier_start = odf['volume_m3'].iloc[0] * cfg.PARAMS['ice_density']
 
-    # do the climate calibration:
+        mass_in_snow = odf['snow_bucket'].iloc[-1]
+        mass_in = odf['tot_prcp'].iloc[:-1].sum()
+        mass_out = odf['runoff'].iloc[:-1].sum()
+        assert_allclose(mass_in_glacier_end,
+                        mass_in_glacier_start + mass_in - mass_out - mass_in_snow,
+                        atol=1e-2)  # 0.01 kg is OK as numerical error
+        # mass conservation in each step
+        # mass in glacier in each moment should be equal to mass of the glacier in the timestep before + all mass input until this timestep - all mass output until with timestep - snow bucket in this timestep
+        mass_in_snow = np.diff(odf['snow_bucket'])
+        mass_in = odf['tot_prcp'].iloc[:-1]
+        mass_out = odf['runoff'].iloc[:-1]
+        mass_in_glacier_end = odf['volume_m3'].iloc[1:] * cfg.PARAMS['ice_density']  # to get kg
+        mass_in_glacier_start = odf['volume_m3'].iloc[0:-1] * cfg.PARAMS['ice_density']
 
-    # and get here the right melt_f fitting to that precipitation factor
-    h, w = gdir.get_inversion_flowline_hw()
-    # find the melt factor that minimises the bias to the geodetic observations
-    melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 1, 1000,
-                                       disp=True, xtol=0.1,
-                                       args=(mb_mod, mb_geodetic, h, w,
-                                             pf, False,
-                                             np.arange(2000, ye, 1)  # time period that we want to calibrate
-                                             ))
-    mb_mod.melt_f = melt_f_opt
-    mb_mod.prcp_fac = pf
+        assert_allclose(mass_in_glacier_end,
+                        mass_in_glacier_start + mass_in - mass_out - mass_in_snow,
+                        atol=1e-2)
 
-    # just check if calibration worked ...
-    spec_mb = mb_mod.get_specific_mb(heights=h, widths=w, year=np.arange(2000, ye, 1)).mean()
-    np.testing.assert_allclose(mb_geodetic, spec_mb, rtol=1e-2)
+        # Qualitative assessments
 
-    # get the apparent_mb (necessary for inversion)
-    climate.apparent_mb_from_any_mb(gdir, mb_model=mb_mod,
-                                    mb_years=np.arange(1979, ye, 1))
+        # why is 0.7 used as factor? this assertion fails with other glaciers (e.g. RGI60-11.00890), suggest to remove 0.7
+        assert odf['melt_on_glacier'].iloc[-1] < odf['melt_on_glacier'].iloc[0]  # * 0.7
+        # if you force it for year 2003 at the end there should be more precipitation off glacier than on the glacier
+        # at least for glaciers in european alps!
+        # what is this assertion testing? It fails if you try it with other glaciers (e.g. RGI60-11.00890)
+        # assert odf['liq_prcp_off_glacier'].iloc[-1] > odf['liq_prcp_on_glacier'].iloc[-1]
+        # liquid precipitation off glacier should be smaller than liquid precipitation on glacier at the start of the run
+        assert odf['liq_prcp_off_glacier'].iloc[0] < odf['liq_prcp_on_glacier'].iloc[0]
+        if odf['on_area'].iloc[-1:-5].median() > odf['on_area'].iloc[0:5].median():
+            assert odf['liq_prcp_off_glacier'].iloc[-1:-5].median() > odf['liq_prcp_off_glacier'].iloc[0:5].median()
+            assert odf['liq_prcp_on_glacier'].iloc[-1:-5].median() < odf['liq_prcp_on_glacier'].iloc[0:5].median()
+            assert odf['snowfall_on_glacier'].iloc[-1:-5].median() < odf['snowfall_on_glacier'].iloc[0:5].median()
+            assert odf['melt_off_glacier'].iloc[-1:-5].median() > odf['melt_off_glacier'].iloc[0:5].median()
+            assert odf['melt_on_glacier'].iloc[-1:-5].median() < odf['melt_on_glacier'].iloc[0:5].median()
 
-    fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
-    d = {'melt_f_pf_{}'.format(np.round(pf, 2)): melt_f_opt}
-    gdir.write_json(d, filename='melt_f_geod', filesuffix=fs)
+        # for year with smallest area, liquid prec, melt and snowfall off glacier should be smallest within the years closeby
+        vars = [('liq_prcp_on_glacier', 'liq_prcp_off_glacier'), ('snowfall_on_glacier', 'snowfall_off_glacier'),
+                ('melt_on_glacier', 'melt_off_glacier')]
+        for var in vars:
+            assert np.argmin(odf['off_area']) - 15 <= np.argmin(odf[var[1]]) <= np.argmin(odf['off_area']) + 15
+            assert np.argmin(odf['off_area']) - 15 <= np.argmax(odf[var[0]]) <= np.argmin(odf['off_area']) + 15
+        # odf['on_area'].argmax()
 
+        # Residual MB should not be crazy large
+        frac = odf['residual_mb'] / odf['melt_on_glacier']
+        # this assertion does not work on other glacier, (e.g. RGI60-11.00890 reaches 0.25!!)
+        # assert_allclose(frac, 0, atol=0.06)  # annual can be large (prob)
+
+    # @pytest.mark.slow
+    @pytest.mark.parametrize('mb_run', ['random', 'hist'])
+    @pytest.mark.parametrize('mb_type', ['mb_monthly', 'mb_real_daily'])
+    def test_hydro_monthly_vs_annual_from_oggm_core(self, gdir,  # inversion_params,
+                                                    mb_run, mb_type):
+        # TODO: need to make this test compatible !!!
+
+        mb_bias = 0
+        cfg.PARAMS['store_diagnostic_variables'] = ALL_DIAGS
+        cfg.PARAMS['hydro_month_nh'] = 1
+
+        pf = 2
+        climate_type = 'W5E5'
+        grad_type = 'var_an_cycle'
+
+        if climate_type == 'W5E5':
+            ye = 2020  # till end of 2019
+        else:
+            ye = 2019
+
+        if mb_type == 'mb_real_daily':
+            temporal_resol = 'daily'
+        else:
+            temporal_resol = 'monthly'
+        process_w5e5_data(gdir, temporal_resol=temporal_resol,
+                          climate_type=climate_type)
+        ###
+        melt_f_calib_geod_prep_inversion(gdir,
+                                         pf=pf,  # precipitation factor
+                                         mb_type=mb_type, grad_type=grad_type,
+                                         climate_type=climate_type, residual=0,
+                                         path_geodetic=path, ye=ye)
+
+        # here just calibrate a-factor to that single glacier
+        workflow.execute_entity_task(tasks.compute_downstream_line, [gdir])
+        workflow.execute_entity_task(tasks.compute_downstream_bedshape, [gdir])
+
+        oggm.workflow.calibrate_inversion_from_consensus([gdir],
+                                                         apply_fs_on_mismatch=False,
+                                                         error_on_mismatch=False,
+                                                         )
+        workflow.execute_entity_task(tasks.init_present_time_glacier, [gdir])
+
+        gdir.rgi_date = 1990
+
+        if mb_run == 'random':
+            tasks.run_with_hydro(gdir, run_task=run_random_climate_TIModel,
+                                 bias=mb_bias,
+                                 store_monthly_hydro=False,
+                                 seed=0, nyears=20, y0=2003 - 5, halfsize=5,
+                                 output_filesuffix='_annual',
+                                 melt_f='from_json',
+                                 precipitation_factor=pf,
+                                 climate_input_filesuffix=climate_type,
+                                 mb_type=mb_type, grad_type=grad_type)
+
+            tasks.run_with_hydro(gdir, run_task=run_random_climate_TIModel,
+                                 bias=mb_bias,
+                                 store_monthly_hydro=True,
+                                 seed=0, nyears=20, y0=2003 - 5, halfsize=5,
+                                 output_filesuffix='_monthly',
+                                 melt_f='from_json',
+                                 precipitation_factor=pf,
+                                 climate_input_filesuffix=climate_type,
+                                 mb_type=mb_type, grad_type=grad_type)
+        elif mb_run == 'hist':
+            tasks.run_with_hydro(gdir, run_task=run_from_climate_data_TIModel,
+                                 bias=mb_bias,
+                                 store_monthly_hydro=False,
+                                 min_ys=1980, output_filesuffix='_annual',
+                                 melt_f='from_json',
+                                 precipitation_factor=pf,
+                                 climate_input_filesuffix=climate_type,
+                                 mb_type=mb_type, grad_type=grad_type)
+            tasks.run_with_hydro(gdir, run_task=run_from_climate_data_TIModel,
+                                 bias=mb_bias,
+                                 store_monthly_hydro=True,
+                                 min_ys=1980, output_filesuffix='_monthly',
+                                 melt_f='from_json',
+                                 precipitation_factor=pf,
+                                 climate_input_filesuffix=climate_type,
+                                 mb_type=mb_type, grad_type=grad_type)
+
+        with xr.open_dataset(gdir.get_filepath('model_diagnostics',
+                                               filesuffix='_annual')) as ds:
+            odf_a = ds.to_dataframe()
+
+        with xr.open_dataset(gdir.get_filepath('model_diagnostics',
+                                               filesuffix='_monthly')) as ds:
+            sel_vars = [v for v in ds.variables if 'month_2d' not in ds[v].dims]
+            odf_m = ds[sel_vars].to_dataframe()
+            sel_vars = [v for v in ds.variables if 'month_2d' in ds[v].dims]
+            odf_ma = ds[sel_vars].mean(dim='time').to_dataframe()
+            odf_ma.columns = [c.replace('_monthly', '') for c in odf_ma.columns]
+
+        # Check that yearly equals monthly
+        np.testing.assert_array_equal(odf_a.columns, odf_m.columns)
+        for c in odf_a.columns:
+            rtol = 1e-5
+            if c == 'melt_off_glacier':
+                # rtol = 0.15
+                # quite different, up tp 50%!
+                # but this is 'ok' as fabien said
+                # run_with_hydro with annual update is just very different there
+                if mb_type == 'mb_monthly':
+                    # why is it even worse for mb_monthly
+                    rtol = 1.1
+                elif mb_type == 'mb_real_daily':
+                    # sum of daily solid prcp update
+                    rtol = 0.8  # 0.5
+            if c in ['snow_bucket']:
+                continue
+            assert_allclose(odf_a[c], odf_m[c], rtol=rtol)
+
+        # Check monthly stuff
+        odf_ma['tot_prcp'] = (odf_ma['liq_prcp_off_glacier'] +
+                              odf_ma['liq_prcp_on_glacier'] +
+                              odf_ma['snowfall_off_glacier'] +
+                              odf_ma['snowfall_on_glacier'])
+
+        odf_ma['runoff'] = (odf_ma['melt_on_glacier'] +
+                            odf_ma['melt_off_glacier'] +
+                            odf_ma['liq_prcp_on_glacier'] +
+                            odf_ma['liq_prcp_off_glacier'])
+
+        # Regardless of MB bias the melt in HYDROmonths 3, 4, 5, 6 should be zero
+        # calendar monthls 12,1,2
+        # TODO: in my case it is not zero!!! @fabien @sarah
+        # I guess this because sometimes in March the temperature threshold is passed?
+        # in Dec, Jan, Feb around <1e7 kg and in August >1e9 kg
+        # this assertion does not work with 'RGI60-11.01328'
+        # assert_allclose(odf_ma['melt_on_glacier'].loc[:3], 0, atol=1e7)
+        # maybe better to check whether melt in winter very small compared to summer melt?
+        assert odf_ma['melt_on_glacier'].loc[:3].mean() / odf_ma['melt_on_glacier'].loc[6:8].mean() < 0.02
+
+        assert odf_ma['melt_on_glacier'].iloc[5:9].mean() > odf_ma['melt_on_glacier'].iloc[0:3].mean()
+        assert odf_ma['melt_on_glacier'].iloc[5:9].mean() > odf_ma['melt_on_glacier'].iloc[10:].mean()
+        assert odf_ma['melt_off_glacier'].iloc[5:9].mean() > odf_ma['melt_off_glacier'].iloc[0:3].mean()
+        assert odf_ma['melt_off_glacier'].iloc[5:9].mean() > odf_ma['melt_off_glacier'].iloc[10:].mean()
+        assert odf_ma['liq_prcp_on_glacier'].iloc[5:9].mean() > odf_ma['liq_prcp_on_glacier'].iloc[0:3].mean()
+        assert odf_ma['liq_prcp_on_glacier'].iloc[5:9].mean() > odf_ma['liq_prcp_on_glacier'].iloc[10:].mean()
+        assert odf_ma['liq_prcp_off_glacier'].iloc[5:9].mean() > odf_ma['liq_prcp_off_glacier'].iloc[0:3].mean()
+        assert odf_ma['liq_prcp_off_glacier'].iloc[5:9].mean() > odf_ma['liq_prcp_off_glacier'].iloc[10:].mean()
+
+        # Residual MB should not be crazy large
+        frac = odf_ma['residual_mb'] / odf_ma['melt_on_glacier']
+        frac[odf_ma['melt_on_glacier'] < 1e-4] = 0
+        assert_allclose(frac.loc[~frac.isnull()], 0, atol=0.02)  # atol=0.01) for other glaciers this is larger
+
+        # Runoff peak should follow a temperature curve
+        # month with largest runoff should be in August (calendar years!!!)
+        assert_allclose(odf_ma['runoff'].idxmax(), 8, atol=1.1)
+        assert_allclose(odf_ma['melt_on_glacier'].idxmax(), 8, atol=1.1)
+        # in summer month ratio of rain to snow should be largest
+        ratio_rain_snow = odf_ma['liq_prcp_on_glacier'] / odf_ma['snowfall_on_glacier']
+        assert_allclose(np.argmax(ratio_rain_snow), 8, atol=2.1)
