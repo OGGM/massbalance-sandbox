@@ -116,6 +116,8 @@ def gdir():
 
     cfg.initialize()
     cfg.PARAMS['use_multiprocessing'] = False
+    cfg.PARAMS['hydro_month_nh'] = 1
+    cfg.PARAMS['hydro_month_sh'] = 1
     test_dir = '/home/lilianschuster/Schreibtisch/PhD/oggm_files/MBsandbox_tests'
     if not os.path.exists(test_dir):
         test_dir = utils.gettempdir(dirname='OGGM_MBsandbox_test',
@@ -125,7 +127,9 @@ def gdir():
     base_url = ('https://cluster.klima.uni-bremen.de/~oggm/gdirs/oggm_v1.4/'
                 'L1-L2_files/elev_bands')
 
-    df = ['RGI60-11.00897']
+    df = ['RGI60-11.00897'] # #897 HEF #1328 largest glacier Rhine, #1346 second largest glacier rhine
+    #Pakistan: biafo glacier RGI60-14.00005, hispar glacier 14.04477, 14.06794 baltoro glacier
+    #Andes: 'RGI60-16.01053', RGI60-16.01251
     gdirs = workflow.init_glacier_directories(df, from_prepro_level=2,
                                               prepro_border=10,
                                               prepro_base_url=base_url,
