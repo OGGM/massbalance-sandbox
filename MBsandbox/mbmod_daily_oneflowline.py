@@ -13,7 +13,7 @@ different temperature index mass balance types added that are working with the H
 #     import numpy as onp
 # else: problem: nan values, where stuff ...
 import numpy as np
-
+from scipy.interpolate import interp1d
 import pandas as pd
 import xarray as xr
 import os
@@ -22,6 +22,8 @@ import datetime
 import warnings
 import scipy.stats as stats
 import logging
+import copy
+
 # import oggm
 
 # imports from oggm
@@ -29,6 +31,7 @@ from oggm import entity_task
 from oggm import cfg, utils
 from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH, SEC_IN_DAY
 from oggm.utils import (floatyear_to_date, date_to_floatyear, ncDataset,
+                        lazy_property, monthly_timeseries,
                         clip_min, clip_array)
 from oggm.utils._funcs import haversine
 from oggm.exceptions import InvalidParamsError, InvalidWorkflowError
@@ -1432,8 +1435,8 @@ class TIModel_Parent(MassBalanceModel):
 
     def _get_2d_monthly_climate(self, heights, year=None):
         # first get the climate data
-        warnings.warn('Attention: this has not been tested enough to be sure that '
-                'it works')
+        #warnings.warn('Attention: this has not been tested enough to be sure that '
+        #        'it works')
         if self.mb_type == 'mb_real_daily':
             return self._get_climate(heights, 'monthly', year=year)
         else:
@@ -1442,8 +1445,8 @@ class TIModel_Parent(MassBalanceModel):
 
     def get_monthly_climate(self, heights, year=None):
         # first get the climate data
-        warnings.warn('Attention: this has not been tested enough to be sure that \
-                it works')
+        #warnings.warn('Attention: this has not been tested enough to be sure that \
+        #        it works')
         if self.mb_type == 'mb_real_daily':
             t, tfmelt, prcp, prcpsol = self._get_climate(heights, 'monthly',
                                                          year=year)
@@ -1700,6 +1703,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
                  melt_f_ratio_snow_to_ice=0.5,
                  melt_f_update='annual',
                  spinup_yrs=6,
+                 tau_e_fold_yr = 0.5,
+                 melt_f_change = 'linear',
                  **kwargs):
 
         '''
@@ -1726,11 +1731,23 @@ class TIModel_Sfc_Type(TIModel_Parent):
             Default is 6 years. After these 6 years every bucket has the opportunity
             to be filled (as we have 1 snow bucket and 5 firn buckets, or
             72 monthly buckets)
+        tau_e_fold_yr : float
+            default is 0.5, only used if melt_f_change is 'neg_exp', it describes how fast the snow melt
+            factor approximates to the ice melt factor via
+            melt_f = melt_f_ice + (melt_f_snow - melt_f_ice)* np.exp(-time_yr/tau_e_fold_yr) # s: in months
+            do not set to 0, otherwise the melt_f of the first bucket is np.NaN
+        melt_f_change : str
+            default is linear, how the snow melt factor changes to the ice melt factor, either 'linear'
+            or 'neg_exp' (see `tau_e_fold_yr` for the equation)
+
         kwargs
         '''
         super().__init__(gdir, melt_f, **kwargs)
 
         # ratio of snow melt_f to ice melt_f
+        self.tau_e_fold_yr = tau_e_fold_yr  # t_albedo
+        assert tau_e_fold_yr > 0, "tau_e_fold_yr has to be above zero!"
+        self.melt_f_change = melt_f_change
         self.melt_f_ratio_snow_to_ice = melt_f_ratio_snow_to_ice
         self.melt_f_update = melt_f_update
         self.spinup_yrs = spinup_yrs
@@ -1751,6 +1768,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         self.fl = gdir.read_pickle('inversion_flowlines')[-1]
         # save the inversion height to later check if the same height is applied!!!
         self.inv_heights = self.fl.surface_h
+
 
         # container template
         # use the distance_along_flowline as index
@@ -1776,11 +1794,51 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # (6*12 or 6 buckets depending if melt_f_update is monthly or annual)
         self.pd_bucket = pd_bucket
 
-    def reset_pd_mb_bucket(self):
+    @property
+    def melt_f_buckets(self):
+        # interpolate linearly from snow melt_f to ice melt_f, use melt_f_ratio_snow_to_ice
+        # to get snow melt_f ()
+        # need to do this here and not in init, because otherwise it does not get updated ..
+        # or I would need to set melt_f as property / setter function that updates self.melt_f_buckets....
+        # self.melt_f  : melt_f of ice !!!
+        if self.melt_f_change == 'linear':
+            self._melt_f_buckets = dict(zip(self.buckets + ['ice'],
+                                      np.linspace(self.melt_f * self.melt_f_ratio_snow_to_ice,
+                                                  self.melt_f,
+                                                  len(self.buckets)+1)
+                                      ))
+        elif self.melt_f_change == 'neg_exp':
+            time = np.linspace(0, 6, len(self.buckets + ['ice']))
+            melt_f_snow = self.melt_f_ratio_snow_to_ice * self.melt_f
+            self._melt_f_buckets = dict(zip(self.buckets + ['ice'],
+                                      self.melt_f + (melt_f_snow - self.melt_f) * np.exp(-time / self.tau_e_fold_yr)
+                                      ))
+            # s: in months
+
+        # at the moment we don't allow to set externally the melt_f_buckets but this could be added later ...
+        return self._melt_f_buckets
+
+
+    def reset_pd_mb_bucket(self,
+                           init_model_fls='use_inversion_flowline'):
         """ resets pandas mass balance monthly and annual dataframe as well as the bucket dataframe
         is called when setting new melt_f, prcp_fac, temp_bias, ...
         """
-        #TODO: do I need to reset sometimes only the buckets, or only mb_monthly???
+        #TODO: do I need to reset sometimes only the buckets,
+        # or only mb_monthly???
+        if init_model_fls != 'use_inversion_flowline':
+            #if init_model_fls == 'use_model_flowline':
+            #fls = gdir.read_pickle('model_flowlines')
+            self.fl = copy.deepcopy(init_model_fls)[-1]
+            self.mod_heights = self.fl.surface_h
+
+            # container template
+            # use the distance_along_flowline as index
+            self._pd_mb_template = pd.DataFrame(0, index=self.fl.dx_meter * np.arange(self.fl.nx),
+                                                columns=[])
+            self._pd_mb_template.index.name = 'distance_along_flowline'
+
+
         self.pd_mb_monthly = self._pd_mb_template.copy()
         self.pd_mb_annual = self._pd_mb_template.copy()
 
@@ -1845,7 +1903,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
             #             t, temp2dformelt, prcp, prcpsol = self.get_monthly_climate(heights, year=year)
             #             mb_month = prcpsol - self.melt_f * temp2dformelt
         if self.melt_f_update == 'monthly':
-            if climate_resol is not 'monthly':
+            if climate_resol != 'monthly':
                 raise InvalidWorkflowError('Need monthly climate_resol if melt_f_update is monthly')
             if not isinstance(year, float):
                 raise InvalidParamsError('Year has to be the hydro float year '
@@ -1890,15 +1948,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
             # year is here float year, so it corresponds to 1 month of a specific year
             _, temp2dformelt, _, prcpsol = self.get_monthly_climate(heights, year)
 
-        # interpolate linearly from snow melt_f to ice melt_f, use melt_f_ratio_snow_to_ice
-        # to get snow melt_f ()
-        # need to do this here and not in init, because otherwise it does not get updated ..
-        # or I would need to set melt_f as property / setter function that updates self.melt_f_buckets....
-        melt_f_buckets = dict(zip(self.buckets + ['ice'],
-                                  np.linspace(self.melt_f * self.melt_f_ratio_snow_to_ice,
-                                              self.melt_f,
-                                              len(self.buckets)+1)
-                                  ))
         # len(buckets) +1 because also need ice melt_f that has no bucket
         if climate_resol == 'annual':
             #if self.melt_f_update == 'annual':
@@ -1941,12 +1990,12 @@ class TIModel_Sfc_Type(TIModel_Parent):
             # to convert from kg/m2 in the buckets to tfm [K], we use the melt_f values
             # of each bucket accordingly
             # @Fabi: I need a copy(), because it is updated later?
-            tfm_to_melt_b = self.pd_bucket[b].copy().values / (melt_f_buckets[b]*fact)  # in K
+            tfm_to_melt_b = self.pd_bucket[b].copy().values / (self.melt_f_buckets[b]*fact)  # in K
 
             # this is the amount of the bucket that has not melted (i.e., it remains in the bucket)
             # -> to get this need to reconvert the tfm energy unit into kg/m2 by using the right melt_factor
             # e.g. at the uppest layers there is new snow added ...
-            not_lost_bucket = utils.clip_min(tfm_to_melt_b - remaining_tfm, 0) * melt_f_buckets[b] * fact
+            not_lost_bucket = utils.clip_min(tfm_to_melt_b - remaining_tfm, 0) * self.melt_f_buckets[b] * fact
 
             # amount of kg/m2 lost in this bucket:
             # not yet updated total bucket - amount of not lost mass of that bucket
@@ -1961,7 +2010,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # we assume that the ice bucket is infinite,
         # so everything that could be melted is included inside of delta_kg/m2
         # that means all the remaining tfm energy is used to melt the infinite ice bucket
-        self.pd_bucket['delta_kg/m2'] += -remaining_tfm * melt_f_buckets['ice'] * fact
+        self.pd_bucket['delta_kg/m2'] += -remaining_tfm * self.melt_f_buckets['ice'] * fact
 
         return self.pd_bucket
 
@@ -2033,11 +2082,23 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # if not isinstance(year, int):
         #    raise InvalidParamsError('Year has to be the full year for get_annual_mb,'
         #                             'year needs to be an integer')
-        np.testing.assert_allclose(heights, self.inv_heights,
-                                   err_msg='the heights should correspond to the inversion heights',
-                                   )
+        #np.testing.assert_allclose(heights, self.inv_heights,
+        #                           err_msg='the heights should correspond to the inversion heights',
+        #                           )
+        # np.testing.assert_allclose(heights, self.mod_heights)
+        # only allow that heights
+        if len(self.pd_mb_annual.columns) >0:
+            if self.pd_mb_annual.columns[0] > self.pd_mb_annual.columns[-1]:
+                raise InvalidWorkflowError('need to run years in ascending order! Maybe reset first!')
+        assert heights[0] > heights[-1], "heights should be in descending order!"
+        # otherwise pd_buckets does not work ...
         year = int(year)
-
+        if year < 1979+6:
+            # most climatic data starts in 1979, so if we want to
+            # get the first 6 years can not use a spinup!!!
+            # (or would need to think about sth. else, but not so
+            # important right now!!!
+            spinup = False
         if year in self.pd_mb_annual.columns:
             # if that year has already been computed
             # just get the annual_mb
@@ -2113,7 +2174,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
                     if bucket_output and m == 12:
                         pd_bucket = out[1]
                 # get mb_annual that is produced by
-                mb_annual = self.pd_mb_annual[year]
+                mb_annual = self.pd_mb_annual[year].values
             if bucket_output:
                 return mb_annual, pd_bucket
             else:
@@ -2166,9 +2227,16 @@ class TIModel_Sfc_Type(TIModel_Parent):
             todo: not yet necessary, maybe later? **kwargs necessary to take stuff we don't use (like fls...)
 
         """
-        np.testing.assert_allclose(heights, self.inv_heights,
-                                   err_msg='the heights should correspond to the inversion heights',
-                                   )
+        #np.testing.assert_allclose(heights, self.inv_heights,
+        #                           err_msg='the heights should correspond to the inversion heights',
+        #                           )
+
+        if len(self.pd_mb_monthly.columns) >1:
+            if self.pd_mb_monthly.columns[0] > self.pd_mb_monthly.columns[-1]:
+                raise InvalidWorkflowError('need to run months in ascending order! Maybe reset first!')
+
+        assert heights[0] > heights[-1], "heights should be in descending order!"
+
 
         if year in self.pd_mb_monthly.columns:
             # if that float year has already been computed
@@ -2278,7 +2346,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
 
             elif self.melt_f_update == 'monthly':
                 # year is in float year here
-                self.pd_bucket = self._add_delta_mb_vary_melt_f(heights, year=year, climate_resol='monthly')
+                self.pd_bucket = self._add_delta_mb_vary_melt_f(heights, year=year,
+                                                                climate_resol='monthly')
                 mb_month = self.pd_bucket['delta_kg/m2'].copy().values
 
                 # residual is in mm w.e per year, so SEC_IN_MONTH .. but mb_month
@@ -2414,11 +2483,13 @@ class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
             #    df = gdir.read_json('local_mustar', filesuffix='_' + fl.rgi_id)
             #    kwargs['y0'] = df['t_star']
 
-            if (issubclass(mb_model_class, TIModel_Parent)) \
-                    or (issubclass(mb_model_class, RandomMassBalance_TIModel)):
+            if ((issubclass(mb_model_class, TIModel_Parent))
+                    or (issubclass(mb_model_class, RandomMassBalance_TIModel))
+                    or (issubclass(mb_model_class, ConstantMassBalance_TIModel))):
                 self.flowline_mb_models.append(
-                    mb_model_class(gdir, melt_f, prcp_fac = prcp_fac,
-                                   residual=fl_bias, baseline_climate=rgi_filesuffix,
+                    mb_model_class(gdir, melt_f, prcp_fac=prcp_fac,
+                                   residual=fl_bias,
+                                   baseline_climate=rgi_filesuffix,
                                     **kwargs))
             else:
                 self.flowline_mb_models.append(
@@ -2558,6 +2629,223 @@ class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
             areas = np.append(areas, np.sum(fl.widths))
 
         return np.average(elas, weights=areas)
+
+
+
+class ConstantMassBalance_TIModel(MassBalanceModel):
+    """Constant mass-balance during a chosen period.
+
+    This is useful for equilibrium experiments.
+    """
+
+    def __init__(self, gdir, melt_f=None, prcp_fac = None,
+                 mb_model_sub_class = TIModel,
+                 residual = 0,
+                 baseline_climate=None,
+                 input_filesuffix='default',
+                 filename='climate_historical',
+                 y0=None, halfsize=15,
+                 **kwargs):
+        """Initialize
+
+        Parameters
+        ----------
+        gdir : GlacierDirectory
+            the glacier directory
+        melt_f : float
+            melt factor (has to be set to a value!)
+        prcp-fac :
+            multiplicative precipitation factor (has to be set to a value)
+        mb_model_sub_class : class, optional
+            the mass-balance model to use: either TIModel (default)
+            or TIModel_Sfc_Type
+        residual :
+            default for TIModel's is 0 ! (best is to not change!)
+        input_filesuffix : str
+            defult is '', filesuffix of climate file that should be used
+        filename : str
+            climate filename, default is 'climate_historical',
+        y0 : int
+            the year at the center of the period of interest, needs to be set!!!
+        halfsize : int, optional
+            the half-size of the time window (window size = 2 * halfsize + 1),
+            default are 15 years
+        **kwargs :
+            stuff passed to the TIModel instance!
+        """
+        #filename = 'climate_historical',
+        #input_filesuffix = '',
+        super(ConstantMassBalance_TIModel, self).__init__()
+
+        self.mbmod = mb_model_sub_class(gdir, melt_f=melt_f,
+                                         prcp_fac=prcp_fac, residual=residual,
+                                         input_filesuffix=input_filesuffix,
+                                        baseline_climate=baseline_climate,
+                                         filename=filename,
+                                         **kwargs)
+
+        if y0 is None:
+            raise InvalidWorkflowError('need to set y0 as we do not use tstar in this case')
+        # This is a quick'n dirty optimisation
+        try:
+            fls = gdir.read_pickle('model_flowlines')
+            h = []
+            for fl in fls:
+                # We use bed because of overdeepenings
+                h = np.append(h, fl.bed_h)
+                h = np.append(h, fl.surface_h)
+            zminmax = np.round([np.min(h)-50, np.max(h)+2000])
+        except FileNotFoundError:
+            # in case we don't have them
+            with ncDataset(gdir.get_filepath('gridded_data')) as nc:
+                if np.isfinite(nc.min_h_dem):
+                    # a bug sometimes led to non-finite
+                    zminmax = [nc.min_h_dem-250, nc.max_h_dem+1500]
+                else:
+                    zminmax = [nc.min_h_glacier-1250, nc.max_h_glacier+1500]
+        self.hbins = np.arange(*zminmax, step=10)
+        self.valid_bounds = self.hbins[[0, -1]]
+        self.y0 = y0
+        self.halfsize = halfsize
+        self.years = np.arange(y0-halfsize, y0+halfsize+1)
+        self.hemisphere = gdir.hemisphere
+
+    @property
+    def temp_bias(self):
+        """Temperature bias to add to the original series."""
+        return self.mbmod.temp_bias
+
+    @temp_bias.setter
+    def temp_bias(self, value):
+        """Temperature bias to add to the original series."""
+        for attr_name in ['_lazy_interp_yr', '_lazy_interp_m']:
+            if hasattr(self, attr_name):
+                delattr(self, attr_name)
+        self.mbmod.temp_bias = value
+
+    @property
+    def prcp_fac(self):
+        """Precipitation factor to apply to the original series."""
+        return self.mbmod.prcp_fac
+
+    @prcp_fac.setter
+    def prcp_fac(self, value):
+        """Precipitation factor to apply to the original series."""
+        for attr_name in ['_lazy_interp_yr', '_lazy_interp_m']:
+            if hasattr(self, attr_name):
+                delattr(self, attr_name)
+        self.mbmod.prcp_fac = value
+
+    def historical_climate_qc_mod(self, gdir):
+        return self.mbmod.historical_climate_qc_mod(gdir)
+
+    @property
+    def residual(self):
+        """Residual bias to apply to the original series."""
+        return self.mbmod.residual
+
+    @residual.setter
+    def residual(self, value):
+        """Residual bias to apply to the original series."""
+        self.mbmod.residual = value
+
+    @lazy_property
+    def interp_yr(self):
+        # annual MB
+        mb_on_h = self.hbins*0.
+        for yr in self.years:
+            mb_on_h += self.mbmod.get_annual_mb(self.hbins, year=yr)
+        return interp1d(self.hbins, mb_on_h / len(self.years))
+
+    @lazy_property
+    def interp_m(self):
+        # monthly MB
+        months = np.arange(12)+1
+        interp_m = []
+        for m in months:
+            mb_on_h = self.hbins*0.
+            for yr in self.years:
+                yr = date_to_floatyear(yr, m)
+                mb_on_h += self.mbmod.get_monthly_mb(self.hbins, year=yr)
+            interp_m.append(interp1d(self.hbins, mb_on_h / len(self.years)))
+        return interp_m
+
+    def get_monthly_climate(self, heights, year=None):
+        """Average climate information at given heights.
+
+        Note that prcp is corrected with the precipitation factor and that
+        all other biases (precipitation, temp) are applied
+
+        Returns
+        -------
+        (temp, tempformelt, prcp, prcpsol)
+        """
+        _, m = floatyear_to_date(year)
+        yrs = [date_to_floatyear(y, m) for y in self.years]
+        heights = np.atleast_1d(heights)
+        nh = len(heights)
+        shape = (len(yrs), nh)
+        temp = np.zeros(shape)
+        tempformelt = np.zeros(shape)
+        prcp = np.zeros(shape)
+        prcpsol = np.zeros(shape)
+        for i, yr in enumerate(yrs):
+            t, tm, p, ps = self.mbmod.get_monthly_climate(heights, year=yr)
+            temp[i, :] = t
+            tempformelt[i, :] = tm
+            prcp[i, :] = p
+            prcpsol[i, :] = ps
+        return (np.mean(temp, axis=0),
+                np.mean(tempformelt, axis=0),
+                np.mean(prcp, axis=0),
+                np.mean(prcpsol, axis=0))
+
+    def get_annual_climate(self, heights, year=None):
+        """Average climate information at given heights.
+
+        Note that prcp is corrected with the precipitation factor and that
+        all other biases (precipitation, temp) are applied
+
+        Returns
+        -------
+        (temp, tempformelt, prcp, prcpsol)
+        """
+        yrs = monthly_timeseries(self.years[0], self.years[-1],
+                                 include_last_year=True)
+        heights = np.atleast_1d(heights)
+        nh = len(heights)
+        shape = (len(yrs), nh)
+        temp = np.zeros(shape)
+        tempformelt = np.zeros(shape)
+        prcp = np.zeros(shape)
+        prcpsol = np.zeros(shape)
+        for i, yr in enumerate(yrs):
+            t, tm, p, ps = self.mbmod.get_monthly_climate(heights, year=yr)
+            temp[i, :] = t
+            tempformelt[i, :] = tm
+            prcp[i, :] = p
+            prcpsol[i, :] = ps
+        # Note that we do not weight for number of days per month:
+        # this is consistent with OGGM's calendar
+        return (np.mean(temp, axis=0),
+                np.mean(tempformelt, axis=0) * 12,
+                np.mean(prcp, axis=0) * 12,
+                np.mean(prcpsol, axis=0) * 12)
+
+    def get_monthly_mb(self, heights, year=None, add_climate=False, **kwargs):
+        yr, m = floatyear_to_date(year)
+        if add_climate:
+            t, tmelt, prcp, prcpsol = self.get_monthly_climate(heights, year=year)
+            return self.interp_m[m-1](heights), t, tmelt, prcp, prcpsol
+        return self.interp_m[m-1](heights)
+
+    def get_annual_mb(self, heights, year=None, add_climate=False, **kwargs):
+        mb = self.interp_yr(heights)
+        if add_climate:
+            t, tmelt, prcp, prcpsol = self.get_annual_climate(heights)
+            return mb, t, tmelt, prcp, prcpsol
+        return mb
+
 
 
 @entity_task(log)

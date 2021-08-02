@@ -8,10 +8,11 @@ import pytest
 from numpy.testing import assert_allclose
 
 # import the MBsandbox modules
-from MBsandbox.mbmod_daily_oneflowline import process_w5e5_data
+from MBsandbox.mbmod_daily_oneflowline import process_w5e5_data, TIModel_Sfc_Type
 from MBsandbox.help_func import melt_f_calib_geod_prep_inversion
 from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel,
-                                        run_random_climate_TIModel)
+                                        run_random_climate_TIModel,
+                                        run_constant_climate_TIModel)
 
 # get the geodetic calibration data
 url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
@@ -170,7 +171,7 @@ class Test_hydro:
         # assert_allclose(frac, 0, atol=0.06)  # annual can be large (prob)
 
     # @pytest.mark.slow
-    @pytest.mark.parametrize('mb_run', ['random', 'hist'])
+    @pytest.mark.parametrize('mb_run', ['cte', 'random', 'hist', ])
     @pytest.mark.parametrize('mb_type', ['mb_monthly', 'mb_real_daily'])
     def test_hydro_monthly_vs_annual_from_oggm_core(self, gdir,  # inversion_params,
                                                     mb_run, mb_type):
@@ -247,6 +248,25 @@ class Test_hydro:
                                  bias=mb_bias,
                                  store_monthly_hydro=True,
                                  min_ys=1980, output_filesuffix='_monthly',
+                                 melt_f='from_json',
+                                 precipitation_factor=pf,
+                                 climate_input_filesuffix=climate_type,
+                                 mb_type=mb_type, grad_type=grad_type)
+        elif mb_run == 'cte':
+            tasks.run_with_hydro(gdir, run_task=run_constant_climate_TIModel,
+                                 bias=mb_bias,
+                                 store_monthly_hydro=False,
+                                 nyears=20, y0=2003 - 5, halfsize=5,
+                                 output_filesuffix='_annual',
+                                 melt_f='from_json',
+                                 precipitation_factor=pf,
+                                 climate_input_filesuffix=climate_type,
+                                 mb_type=mb_type, grad_type=grad_type)
+            tasks.run_with_hydro(gdir, run_task=run_constant_climate_TIModel,
+                                 bias=mb_bias,
+                                 store_monthly_hydro=True,
+                                 nyears=20, y0=2003 - 5, halfsize=5,
+                                 output_filesuffix='_monthly',
                                  melt_f='from_json',
                                  precipitation_factor=pf,
                                  climate_input_filesuffix=climate_type,

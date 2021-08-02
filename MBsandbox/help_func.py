@@ -19,7 +19,7 @@ import logging
 log = logging.getLogger(__name__)
 
 # imports from local MBsandbox package modules
-from MBsandbox.mbmod_daily_oneflowline import TIModel
+from MBsandbox.mbmod_daily_oneflowline import TIModel, TIModel_Sfc_Type
 
 # %%
 def minimize_bias(x, gd_mb=None, gdir_min=None,
@@ -85,7 +85,7 @@ def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
                            absolute_bias=False,
                            ys=np.arange(2000, 2019, 1),
                            oggm_default_mb=False,
-                           spinup=False):
+                           spinup=True):
     """ calibrates the melt factor (melt_f) by getting the bias to zero
     comparing modelled mean specific mass balance between 2000 and 2020 to
     observed geodetic data
@@ -307,7 +307,9 @@ cfg.BASENAMES['melt_f_geod'] = ('melt_f_geod.json', _doc)
 @entity_task(log)
 def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte',
                                      pf=None, climate_type='W5E5',
-                                     residual=0, path_geodetic=None, ye=None):
+                                     residual=0, path_geodetic=None, ye=None,
+                                     mb_model_sub_class=TIModel,
+                                     kwargs_for_TIModel_Sfc_Type={}):
     """ calibrates the melt factor using the TIModel mass-balance model,
     computes the apparent mass balance for the inversion
     and saves the melt_f and the applied pf into a json inside of the glacier directory
@@ -322,8 +324,10 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
 
     # instantiate the mass-balance model
     # this is used instead of the melt_f
-    mb_mod = TIModel(gdir, None, mb_type=mb_type, grad_type=grad_type,
-                     baseline_climate=climate_type, residual=residual)
+    mb_mod = mb_model_sub_class(gdir, None, mb_type=mb_type,
+                                grad_type=grad_type,
+                     baseline_climate=climate_type, residual=residual,
+                                **kwargs_for_TIModel_Sfc_Type)
 
     # if necessary add a temperature bias (reference height change)
     mb_mod.historical_climate_qc_mod(gdir)
@@ -333,7 +337,7 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
     # and get here the right melt_f fitting to that precipitation factor
     h, w = gdir.get_inversion_flowline_hw()
     # find the melt factor that minimises the bias to the geodetic observations
-    melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 1, 1000,
+    melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
                                        disp=True, xtol=0.1,
                                        args=(mb_mod, mb_geodetic, h, w,
                                              pf, False,
@@ -343,13 +347,16 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
     mb_mod.prcp_fac = pf
 
     # just check if calibration worked ...
-    spec_mb = mb_mod.get_specific_mb(heights=h, widths=w, year=np.arange(2000, ye, 1)).mean()
+    spec_mb = mb_mod.get_specific_mb(heights=h, widths=w,
+                                     year=np.arange(2000, ye, 1)).mean()
     np.testing.assert_allclose(mb_geodetic, spec_mb, rtol=1e-2)
-
+    if mb_model_sub_class == TIModel_Sfc_Type:
+        mb_mod.reset_pd_mb_bucket()
+    # Todo: which starting year if set to 1979 I get problems !!!
     # get the apparent_mb (necessary for inversion)
     climate.apparent_mb_from_any_mb(gdir, mb_model=mb_mod,
-                                    mb_years=np.arange(1979, ye, 1))
-
+                                    mb_years=np.arange(2000, ye, 1))
+    # TODO: maybe also add type of mb_model_sub_class into fs ???
     fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
     d = {'melt_f_pf_{}'.format(np.round(pf, 2)): melt_f_opt}
     gdir.write_json(d, filename='melt_f_geod', filesuffix=fs)
