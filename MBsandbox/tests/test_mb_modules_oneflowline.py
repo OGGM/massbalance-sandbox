@@ -52,6 +52,66 @@ pf = 2.5
 # %%
 class Test_geodetic_sfc_type:
 
+    def test_sfc_type_linear_vs_neg_exp(self, gdir, mb_type='mb_monthly'):
+        cfg.PARAMS['hydro_month_nh'] = 1
+        # just choose any random melt_f
+        melt_f_ratio = 0.5
+        tau_e_fold_yr = 0.5 # yr (6 months, e-folding change of melt_f)
+        melt_f_ice = 300
+        pf = 2  # precipitation factor
+
+        baseline_climate = 'W5E5'
+        temporal_resol = 'monthly'
+        process_w5e5_data(gdir, temporal_resol=temporal_resol,
+                          climate_type=baseline_climate)
+        h, w = gdir.get_inversion_flowline_hw()
+
+        # with normal spinup for 6 years
+        mb_mod_monthly_0_5_m_neg_exp = TIModel_Sfc_Type(gdir, melt_f_ice, mb_type=mb_type,
+                                                        melt_f_ratio_snow_to_ice=melt_f_ratio, prcp_fac=pf,
+                                                        melt_f_update='monthly',
+                                                        melt_f_change='neg_exp',
+                                                        tau_e_fold_yr=tau_e_fold_yr,  # default
+                                                        baseline_climate=baseline_climate)
+        melt_f_snow = melt_f_ice * melt_f_ratio
+        time = np.linspace(0, 6, len(mb_mod_monthly_0_5_m_neg_exp.buckets + ['ice'])) # in years
+        melt_f_buckets = melt_f_ice + (melt_f_snow - melt_f_ice) * np.exp(- time / tau_e_fold_yr)  # s: in months
+
+        assert_allclose(np.fromiter(mb_mod_monthly_0_5_m_neg_exp.melt_f_buckets.values(),
+                                    dtype=float),
+                        melt_f_buckets)
+
+        # if melt_f_ratio_snow_to_ice is 1, the melt_f should be everywhere the same
+        mb_mod_monthly_1_m_neg_exp_tau_0_5 = TIModel_Sfc_Type(gdir, melt_f_ice, mb_type=mb_type,
+                                                        melt_f_ratio_snow_to_ice=1, prcp_fac=pf,
+                                                        melt_f_update='monthly',
+                                                        melt_f_change='neg_exp',
+                                                        tau_e_fold_yr=tau_e_fold_yr,  # default
+                                                        baseline_climate=baseline_climate)
+        assert_allclose(np.fromiter(mb_mod_monthly_1_m_neg_exp_tau_0_5.melt_f_buckets.values(),
+                                    dtype=float),
+                        melt_f_ice)
+
+        # if very large tau_e_fold_yr, melt_f should be everywhere the melt_f_snow
+        mb_mod_monthly_0_5_m_neg_exp_tau_large = TIModel_Sfc_Type(gdir, melt_f_ice, mb_type=mb_type,
+                                                                  melt_f_ratio_snow_to_ice=melt_f_ratio,
+                                                                  prcp_fac=pf,
+                                                                  melt_f_update='monthly',
+                                                              melt_f_change='neg_exp',
+                                                              tau_e_fold_yr=1e9,  # default
+                                                              baseline_climate=baseline_climate)
+        assert_allclose(np.fromiter(mb_mod_monthly_0_5_m_neg_exp_tau_large.melt_f_buckets.values(),
+                                    dtype=float),
+                        melt_f_ice*melt_f_ratio)
+
+        # tau_e_fold_yr should be above zero ...
+        with pytest.raises(AssertionError):
+            TIModel_Sfc_Type(gdir, melt_f_ice, mb_type=mb_type, melt_f_ratio_snow_to_ice=melt_f_ratio,
+                             prcp_fac=pf, melt_f_update='monthly', melt_f_change='neg_exp',
+                             tau_e_fold_yr=0,  # default
+                             baseline_climate=baseline_climate)
+
+
     def test_sfc_type_update(self, gdir, mb_type='mb_monthly'):
         cfg.PARAMS['hydro_month_nh'] = 1
         # just choose any random melt_f

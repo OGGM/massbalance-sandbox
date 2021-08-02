@@ -221,7 +221,7 @@ elif step == 'run_proj':
                                      climate_historical_filesuffix='_daily_WFDE5_CRU',
                                         cluster=True);
     else:
-        gdirs = workflow.init_glacier_directories( pd_geodetic_comp_alps.dropna().index.values[start_ind:end_ind])
+        gdirs = workflow.init_glacier_directories(pd_geodetic_comp_alps.dropna().index.values[start_ind:end_ind])
     
     for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_real_daily']: # 'mb_monthly',
         for grad_type in ['cte', 'var_an_cycle']:
