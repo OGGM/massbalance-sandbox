@@ -9,7 +9,8 @@ from oggm.exceptions import InvalidWorkflowError
 # import the MBsandbox modules
 from MBsandbox.mbmod_daily_oneflowline import TIModel, TIModel_Sfc_Type, RandomMassBalance_TIModel
 from MBsandbox.mbmod_daily_oneflowline import (MultipleFlowlineMassBalance_TIModel,
-                                               ConstantMassBalance_TIModel)
+                                               ConstantMassBalance_TIModel,
+                                               AvgClimateMassBalance_TIModel)
 from oggm.core.flowline import flowline_model_run
 import logging
 
@@ -185,8 +186,8 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
     else:
         fls = copy.deepcopy(init_model_fls)
 
-    if reset:
-        mb.flowline_mb_models[-1].reset_pd_mb_bucket(init_model_fls = fls)
+    if reset and mb_model_sub_class == TIModel_Sfc_Type:
+            mb.flowline_mb_models[-1].reset_pd_mb_bucket(init_model_fls = fls)
 
     return flowline_model_run(gdir, output_filesuffix=output_filesuffix,
                               mb_model=mb, ys=ys, ye=ye,
@@ -211,6 +212,7 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                        output_filesuffix='', init_model_fls=None,
                        zero_initial_glacier=False,
                        unique_samples=False, #melt_f_file=None,
+                               reset = True,
                                kwargs_for_TIModel_Sfc_Type={},
                                **kwargs):
 
@@ -327,7 +329,17 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         fls = gdir.read_pickle('model_flowlines')
     else:
         fls = copy.deepcopy(init_model_fls)
-    mb.flowline_mb_models[-1].mbmod.reset_pd_mb_bucket(init_model_fls = fls)
+    if reset and mb_model_sub_class == TIModel_Sfc_Type:
+        mb.flowline_mb_models[-1].mbmod.reset_pd_mb_bucket(init_model_fls = fls)
+
+    # do once the spinup manually but then not again
+    if mb_model_sub_class == TIModel_Sfc_Type:
+        spinup_yrs = kwargs_for_TIModel_Sfc_Type['spinup_yrs']
+        mb.flowline_mb_models[-1].mbmod.get_specific_mb(year=np.arange(y0-halfsize-spinup_yrs,
+                                                                  y0-halfsize),
+                                                        fls=fls)
+        # spinup is done, now set the spinup_yrs to zero for the actual run!!!
+        mb.flowline_mb_models[-1].mbmod.spinup_yrs = 0
 
     return flowline_model_run(gdir, output_filesuffix=output_filesuffix,
                               mb_model=mb, ys=0, ye=nyears,
@@ -358,6 +370,9 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                          init_model_fls=None,
                          zero_initial_glacier=False,
                                  kwargs_for_TIModel_Sfc_Type = {},
+                                 reset = True,
+                                 interpolation_optim=False,
+                                 use_avg_climate=False,
                                  **kwargs):
     """Runs the constant mass-balance model of the TIModel
      for a given number of years.
@@ -460,9 +475,12 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
     if mb_model_sub_class == TIModel and kwargs_for_TIModel_Sfc_Type != {}:
         raise InvalidWorkflowError('if mb_model_sub_class is TIModel,'
                                    ' this should be an empty dict!')
-
+    if use_avg_climate:
+        mb_sub_model_class = AvgClimateMassBalance_TIModel
+    else:
+        mb_sub_model_class = ConstantMassBalance_TIModel
     mb = MultipleFlowlineMassBalance_TIModel(gdir,
-                                             mb_model_class=ConstantMassBalance_TIModel,
+                                             mb_model_class=mb_sub_model_class,
                                              y0=y0, halfsize=halfsize,
                                              bias=bias,
                                              melt_f=melt_f_chosen,
@@ -472,6 +490,7 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                                              filename=climate_filename,
                                              input_filesuffix=climate_input_filesuffix,
                                              mb_model_sub_class=mb_model_sub_class,
+                                             interpolation_optim=interpolation_optim,
                                              **kwargs_for_TIModel_Sfc_Type)
 
 
@@ -486,8 +505,8 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         fls = gdir.read_pickle('model_flowlines')
     else:
         fls = copy.deepcopy(init_model_fls)
-    if mb_model_sub_class == TIModel_Sfc_Type:
-        mb.flowline_mb_models[-1].mbmod.reset_pd_mb_bucket(init_model_fls = fls)
+    if reset and mb_model_sub_class == TIModel_Sfc_Type:
+        mb.flowline_mb_models[-1].reset_pd_mb_bucket(init_model_fls = fls)
 
     return flowline_model_run(gdir, output_filesuffix=output_filesuffix,
                               mb_model=mb, ys=0, ye=nyears,

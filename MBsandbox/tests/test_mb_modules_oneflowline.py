@@ -36,6 +36,10 @@ from MBsandbox.help_func import (compute_stat, minimize_bias,
 from MBsandbox.mbmod_daily_oneflowline import (process_era5_daily_data,
                                                process_w5e5_data,
                                                TIModel, TIModel_Sfc_Type)
+from MBsandbox.mbmod_daily_oneflowline import (process_w5e5_data,
+                                               AvgClimateMassBalance_TIModel,
+                                               ConstantMassBalance_TIModel,
+                                               RandomMassBalance_TIModel)
 
 # optimal values for HEF of mu_star for cte lapse rates (for wgms direct MB)
 mu_star_opt_cte = {'mb_monthly': 213.561413,
@@ -50,6 +54,79 @@ pf = 2.5
 
 
 # %%
+class Test_diff_models:
+    @pytest.mark.parametrize('mb_type', ['mb_monthly', 'mb_pseudo_daily'])
+    def test_avgclimate_mb_model_timodel(self, gdir, mb_type):
+        #todo: do this for real_daily!!!
+        url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
+        path_geodetic = utils.file_downloader(url)
+        pd_geodetic = pd.read_csv(path_geodetic, index_col='rgiid')
+        pd_geodetic = pd_geodetic.loc[pd_geodetic.period == '2000-01-01_2020-01-01']
+        gdir_geodetic = pd_geodetic.loc[gdir.rgi_id]['dmdtda'] * 1000
+        cfg.PARAMS['hydro_month_nh'] = 1
+        pf =1
+        if mb_type == 'mb_monthly':
+            melt_f_calib = 217.8
+            #glen_a_fac = 5.958421001753519
+        elif mb_type == 'mb_pseudo_daily':
+            melt_f_calib = 159.6
+        grad_type = 'cte'
+        climate_type='W5E5'
+        temporal_resol = 'monthly'
+        y0 = 2009
+        hs = 10
+        workflow.execute_entity_task(process_w5e5_data, [gdir],
+                                     temporal_resol=temporal_resol,
+                                     climate_type=climate_type)
+        rho = cfg.PARAMS['ice_density']
+        #workflow.execute_entity_task(tasks.init_present_time_glacier, [gdir])
+
+        h, w = gdir.get_inversion_flowline_hw()
+
+        cmb_mod = ConstantMassBalance_TIModel(gdir, melt_f_calib, prcp_fac=pf,
+                                              mb_type= mb_type,
+                                              grad_type = grad_type,
+                                              baseline_climate = climate_type,
+                                              y0=y0, halfsize=hs)
+        ombh = cmb_mod.get_annual_mb(h) * SEC_IN_YEAR * rho
+        otmb = np.average(ombh, weights=w)
+        np.testing.assert_allclose(gdir_geodetic, otmb, rtol=0.02)
+        np.testing.assert_allclose(gdir_geodetic, otmb, atol=17)
+
+        avg_mod = AvgClimateMassBalance_TIModel(gdir, melt_f_calib, prcp_fac=pf,
+                                              mb_type= mb_type,
+                                              grad_type = grad_type,
+                                              baseline_climate = climate_type,
+                                              y0=y0, halfsize=hs)
+        ombh = avg_mod.get_annual_mb(h) * SEC_IN_YEAR * rho
+        otmb = np.average(ombh, weights=w)
+        # This is now wrong -> but not too far we hope...
+        #np.testing.assert_allclose(gdir_geodetic, otmb, rtol=0.2)
+        np.testing.assert_allclose(gdir_geodetic, otmb, atol=150)
+
+        #np.testing.assert_allclose(0., otmb, atol=130)
+
+        # Another simulation
+        cmb_mod = ConstantMassBalance_TIModel(gdir, melt_f_calib, prcp_fac=pf,
+                                              mb_type= mb_type,
+                                              grad_type = grad_type,
+                                              baseline_climate = climate_type,
+                                              y0=1991, halfsize=hs)
+        ombh = cmb_mod.get_annual_mb(h) * SEC_IN_YEAR * rho
+        otmb = np.average(ombh, weights=w)
+
+
+        avg_mod = AvgClimateMassBalance_TIModel(gdir, melt_f_calib, prcp_fac=pf,
+                                              mb_type= mb_type,
+                                              grad_type = grad_type,
+                                              baseline_climate = climate_type,
+                                              y0=1991, halfsize=hs)
+
+        _ombh = avg_mod.get_annual_mb(h) * SEC_IN_YEAR * rho
+        _otmb = np.average(_ombh, weights=w)
+        # This is now wrong -> but not too far we hope...
+        np.testing.assert_allclose(otmb, _otmb, atol=200)
+
 class Test_geodetic_sfc_type:
 
     def test_sfc_type_linear_vs_neg_exp(self, gdir, mb_type='mb_monthly'):
@@ -253,10 +330,10 @@ class Test_geodetic_sfc_type:
         # right pd_buckets...(pd_bucket evolution is not saved)
         with pytest.raises(InvalidWorkflowError):
             # there is snow
-            mb_mod_1.get_specific_mb(year=years, fls=fls, spinup=True)
+            mb_mod_1.get_specific_mb(year=years, fls=fls)
         # so, we need to reset the buckets here
         mb_mod_1.reset_pd_mb_bucket()
-        spec_1 = mb_mod_1.get_specific_mb(year=years, fls=fls, spinup=True)
+        spec_1 = mb_mod_1.get_specific_mb(year=years, fls=fls)
         spec_no_sfc_type = mb_mod_no_sfc_type.get_specific_mb(year=years, fls=fls)
 
         assert_allclose(spec_1, spec_no_sfc_type)
@@ -297,7 +374,7 @@ class Test_geodetic_sfc_type:
         assert np.shape(mb_mod_1.pd_mb_monthly) == (len(mb_mod_1.fl.dis_on_line), 0)
         assert np.all(mb_mod_1.pd_bucket == 0)
 
-        spec_1 = mb_mod_1.get_specific_mb(year=years, fls=fls, spinup=True)
+        spec_1 = mb_mod_1.get_specific_mb(year=years, fls=fls) #, spin)
         # now check if the pd_mb buckets are filled up
         # if melt_f_update == annual (here), have len(years) + spinup_yrs s as amount of columns
         assert np.shape(mb_mod_1.pd_mb_annual) == (len(mb_mod_1.fl.dis_on_line),
@@ -306,7 +383,7 @@ class Test_geodetic_sfc_type:
         assert np.shape(mb_mod_1.pd_mb_monthly) == (len(mb_mod_1.fl.dis_on_line), 0)
         assert np.any(mb_mod_1.pd_bucket >= 0)
 
-        spec_no_sfc_type = mb_mod_no_sfc_type.get_specific_mb(year=years, fls=fls, spinup=True)
+        spec_no_sfc_type = mb_mod_no_sfc_type.get_specific_mb(year=years, fls=fls)
 
         assert_allclose(spec_1, spec_no_sfc_type)
 
@@ -335,7 +412,7 @@ class Test_geodetic_sfc_type:
         assert melt_f_opt_0_5 > melt_f_opt_1
 
         mb_mod_0_5.melt_f = melt_f_opt_0_5
-        spec_0_5 = mb_mod_0_5.get_specific_mb(year=years, fls=fls, spinup=True)
+        spec_0_5 = mb_mod_0_5.get_specific_mb(year=years, fls=fls)
 
         # check if the optimised specific mass balance using a ratio of 0.5 is similar as
         # the optimised spec. mb of no_sfc_type (i.e, ratio of 1)
@@ -547,14 +624,14 @@ class Test_geodetic_sfc_type:
 
         # this should be almost equal
         # (monthly update with ratio of 1 should be equal to no sfc update)
-        spec_1_m = mb_mod_monthly_1_m.get_specific_mb(year=years, fls=fls, spinup=True)
+        spec_1_m = mb_mod_monthly_1_m.get_specific_mb(year=years, fls=fls) #, spinup=True)
         spec_no_sfc_type = mb_mod_no_sfc_type.get_specific_mb(year=years, fls=fls)
 
         assert_allclose(spec_1_m, spec_no_sfc_type)
 
         # monthly update versus annual update should be similar but not equal
-        spec_0_5_m = mb_mod_monthly_0_5_m.get_specific_mb(year=years, fls=fls, spinup=True)
-        spec_0_5_a = mb_mod_annual_0_5_a.get_specific_mb(year=years, fls=fls, spinup=True)
+        spec_0_5_m = mb_mod_monthly_0_5_m.get_specific_mb(year=years, fls=fls) #, spinup=True)
+        spec_0_5_a = mb_mod_annual_0_5_a.get_specific_mb(year=years, fls=fls) #, spinup=True)
         # specific mass balance is also quite different, does this make sense???
         # if monthly, specific mb rather smaller but not always!!!
         if mb_type == 'mb_real_daily':
@@ -601,8 +678,8 @@ class Test_geodetic_sfc_type:
         assert_allclose(melt_f_opt_1_m, melt_f_check_1[mb_type])
 
         # same specific mass balance?
-        spec_1_m = mb_mod_monthly_1_m.get_specific_mb(year=years, fls=fls, spinup=True)
-        spec_no_sfc_type = mb_mod_no_sfc_type.get_specific_mb(year=years, fls=fls, spinup=True)
+        spec_1_m = mb_mod_monthly_1_m.get_specific_mb(year=years, fls=fls) #, spinup=True)
+        spec_no_sfc_type = mb_mod_no_sfc_type.get_specific_mb(year=years, fls=fls) #, spinup=True)
 
         assert_allclose(spec_1_m, spec_no_sfc_type)
 
@@ -637,8 +714,8 @@ class Test_geodetic_sfc_type:
 
         # similar specific mass balance (as calibrated to same obs.)
         # so at least mean should be same
-        spec_0_5_m = mb_mod_monthly_0_5_m.get_specific_mb(year=years, fls=fls, spinup=True)
-        spec_0_5_a = mb_mod_annual_0_5_a.get_specific_mb(year=years, fls=fls, spinup=True)
+        spec_0_5_m = mb_mod_monthly_0_5_m.get_specific_mb(year=years, fls=fls) #, spinup=True)
+        spec_0_5_a = mb_mod_annual_0_5_a.get_specific_mb(year=years, fls=fls) #, spinup=True)
 
         # did the optimisation work?
         assert_allclose(spec_0_5_m.mean(), mb_geodetic, rtol= 1e-4)
@@ -670,6 +747,50 @@ class Test_geodetic_sfc_type:
                                                              y=mb_annual_no_sfc_type[mb_annual_no_sfc_type < 0])
 
         assert mb_gradient_0_5_m > mb_gradient_no_sfc_type
+
+    @pytest.mark.skip(reason="need refreezing first")
+    @pytest.mark.parametrize('mb_type', ['mb_monthly', 'mb_pseudo_daily',
+                                         'mb_real_daily'
+                                         ])
+    def test_get_2d_avg_annual_air_hydro_temp(self, gdir,
+                                           mb_type):
+
+        cfg.PARAMS['hydro_month_nh'] = 1
+        # just choose any random melt_f
+        melt_f = 200
+        pf = 2  # precipitation factor
+        h, w = gdir.get_inversion_flowline_hw()
+
+        baseline_climate = 'W5E5'
+        if mb_type != 'mb_real_daily':
+            temporal_resol = 'monthly'
+        else:
+            temporal_resol = 'daily'
+        process_w5e5_data(gdir, temporal_resol=temporal_resol,
+                          climate_type=baseline_climate,
+                          )
+
+        # those two should be equal!!!
+        mb_mod = TIModel_Sfc_Type(gdir, melt_f, mb_type=mb_type,
+                                  melt_f_ratio_snow_to_ice=0.5,
+                                  prcp_fac=pf,
+                                  melt_f_update='annual',
+                                  baseline_climate=baseline_climate)
+        year = 2000
+        temp_avg_2d = mb_mod.get_2d_avg_annual_air_hydro_temp(h,
+                                                              year=year)
+        temp_avg_2d.mean(axis=1)
+        if mb_type != 'mb_real_daily':
+            assert np.shape(temp_avg_2d) == (len(h), 12)
+
+
+        temp_avg_2d_clim = mb_mod.get_2d_avg_annual_air_hydro_temp(h,
+                                                              year=year,
+                                                              avg_climate=True)
+        temp_avg_2d_clim.mean(axis=1)
+        if mb_type != 'mb_real_daily':
+            assert np.shape(temp_avg_2d_clim) == (len(h), 12*31)
+
 
 
 class Test_geodetic_hydro1:

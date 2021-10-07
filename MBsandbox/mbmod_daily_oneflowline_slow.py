@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+this is the old slow version where .
+the Test_sfc_type_run works but takes in total 11:30 minutes to run them
+everything works except for test_constant_mass_balance, test_sfc_type_diff_heights
+
 Created on Thu Dec 24 12:28:37 2020
 
 @author: lilianschuster
 
 different temperature index mass balance types added that are working with the Huss flowlines
-
-this is the faster version
 """
 # jax_true = True
 # if jax_true:
@@ -1038,8 +1040,7 @@ class TIModel_Parent(MassBalanceModel):
         # Read climate file
         fpath = gdir.get_filepath(filename, filesuffix=input_filesuffix)
 
-        # used xarray instead of netCDF4, is slower and needs to be changed at some point
-        # to netCDF4
+        # used xarray instead of netCDF4, is this slower?
         with xr.open_dataset(fpath) as xr_nc:
             if self.mb_type == 'mb_real_daily' or self.mb_type == 'mb_monthly':
                 # even if there is temp_std inside the dataset, we won't use
@@ -1440,13 +1441,9 @@ class TIModel_Parent(MassBalanceModel):
     def get_2d_avg_annual_air_hydro_temp(self, heights, year=None,
                                          avg_climate = False, hs = 15,
                                          hydro_m = 10):
-        raise NotImplementedError('not tested and only useful'
-                                  ' for estimating refreezing')
         # WIP
-        # (I won't work on this for the next half a year, but leave
-        # it inside as atemplate)
         # only computes avg annual air temperature in hydrological years,
-        # this is necessary for the refreezing estimate of Woodward et al.1997
+        # this is necessary for the refreezin estimate of Woodward et al.1997
         # only tested for NH here
         # IMPORTANT: this does not take into account that months
         # have different amount of days (should I include the weighting as
@@ -2040,8 +2037,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
             # if melt_f_update annual: treat snow as the amount of solid prcp over that year
             # first add all solid prcp amount to the bucket
             # (the amount of snow that has melted in the same year is taken away in the for loop)
-            #assert np.all(self.pd_bucket[self.first_snow_bucket].copy().values == 0)
-            assert np.all(self.pd_bucket[self.first_snow_bucket].values == 0)
+            assert np.all(self.pd_bucket[self.first_snow_bucket].copy().values == 0)
             self.pd_bucket[self.first_snow_bucket] = prcpsol.sum(axis=1)
             # at first, remaining temp for melt energy is all temp for melt
             # over the bucket loop this term will get gradually smaller until the remaining corresponds
@@ -2058,10 +2054,9 @@ class TIModel_Sfc_Type(TIModel_Parent):
             # !!! in case of climate_resol =='monthly' but annual update,
             # first_snow_bucket is not empty!!!
             if self.melt_f_update == 'monthly':
-                assert np.all(self.pd_bucket[self.first_snow_bucket].values == 0)
-            # self.pd_bucket[self.first_snow_bucket] = self.pd_bucket[self.first_snow_bucket].values.copy() + prcpsol.flatten() # .sum(axis=1)
-            # do NOT need the .copy()
-            self.pd_bucket[self.first_snow_bucket] = self.pd_bucket[self.first_snow_bucket].values + prcpsol.flatten() # .sum(axis=1)
+                #print(self.pd_bucket[self.first_snow_bucket].copy().values)
+                assert np.all(self.pd_bucket[self.first_snow_bucket].copy().values == 0)
+            self.pd_bucket[self.first_snow_bucket] = self.pd_bucket[self.first_snow_bucket].values.copy() + prcpsol.flatten() # .sum(axis=1)
             remaining_tfm = temp2dformelt.flatten()  # .sum(axis=1)
             self.pd_bucket['delta_kg/m2'] = prcpsol.flatten()
 
@@ -2071,44 +2066,29 @@ class TIModel_Sfc_Type(TIModel_Parent):
         else:
             fact = 1
 
-        # how much tempformelt (tfm) would we need to remove all snow, firn of each bucket
-        # in the case of snow it corresponds to tfm to melt all solid prcp
-        # to convert from kg/m2 in the buckets to tfm [K], we use the melt_f values
-        # of each bucket accordingly
-        # no need of .copy(), because directly changed by divisor (/)
-        # tfm_to_melt_b = self.pd_bucket[b].values / (self.melt_f_buckets[b]*fact)  # in K
-        # ok, this can be done outside of th for-loop!!!
-
-        # do not include delta_kg/m2 in pd_buckets, and also do not include melt_f of 'ice'
-        tfm_to_melt_b = self.pd_bucket.values[:,:-1] / (np.array(list(self.melt_f_buckets.values()))[:-1]*fact)  # in K
-        # need to transpose it to have the right shape
-        tfm_to_melt_b = tfm_to_melt_b.T
         for e, b in enumerate(self.buckets):
             # there is no ice bucket !!!
+            # how much tempformelt (tfm) would we need to remove all snow, firn...
+            # in the case of snow it corresponds to tfm to melt all solid prcp
+            # to convert from kg/m2 in the buckets to tfm [K], we use the melt_f values
+            # of each bucket accordingly
+            # @Fabi: I need a copy(), because it is updated later?
+            tfm_to_melt_b = self.pd_bucket[b].copy().values / (self.melt_f_buckets[b]*fact)  # in K
 
-            # now recompute buckests mass:
-            # first mass inside of each bucket that has not melted
-            # (i.e., it remains in the bucket)
+            # this is the amount of the bucket that has not melted (i.e., it remains in the bucket)
             # -> to get this need to reconvert the tfm energy unit into kg/m2 by using the right melt_factor
             # e.g. at the uppest layers there is new snow added ...
-            not_lost_bucket = utils.clip_min(tfm_to_melt_b[e] - remaining_tfm, 0) * self.melt_f_buckets[b] * fact
+            not_lost_bucket = utils.clip_min(tfm_to_melt_b - remaining_tfm, 0) * self.melt_f_buckets[b] * fact
 
-            # remaining tfm to melt older firn layers -> for the next loop ...
-            remaining_tfm = utils.clip_min(remaining_tfm - tfm_to_melt_b[e], 0)
-            # in case of ice, the remaining_tfm is only used to update once again delta_kg/m2
-
-
-            # amount of kg/m2 lost in this bucket will be added to delta_kg/m2
+            # amount of kg/m2 lost in this bucket:
             # not yet updated total bucket - amount of not lost mass of that bucket
-            self.pd_bucket['delta_kg/m2'] += not_lost_bucket - self.pd_bucket[b].values # .copy(), not necessary because minus
-            # update pd_bucket with what has not melted from the bucket
+            self.pd_bucket['delta_kg/m2'] += not_lost_bucket - self.pd_bucket[b].copy()
+            # update pd_bucket with what is not melted from the bucket
             self.pd_bucket[b] = not_lost_bucket
 
-            # if all the remaining_tfm is zero, then go out of the loop,
-            # to make the code faster!
-            # e.g. in winter this should mean that we don't loop over all buckets (as tfm is very small)
-            if np.all(remaining_tfm == 0):
-                break
+            # remaining tfm to melt older firn layers -> for the next loop ...
+            remaining_tfm = utils.clip_min(remaining_tfm - tfm_to_melt_b, 0)
+            # in case of ice, the remaining_tfm is only used to update once again delta_kg/m2
 
         # we assume that the ice bucket is infinite,
         # so everything that could be melted is included inside of delta_kg/m2
@@ -2253,11 +2233,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
             if self.melt_f_update == 'annual':
                 self.pd_bucket = self._add_delta_mb_vary_melt_f(heights, year=year,
                                                                 climate_resol='annual')
-                #mb_annual = self.pd_bucket['delta_kg/m2'].copy().values
-                # I don't need the .copy() here if it is changed anyway
-                # but then the line gets too long ...
-                mb_annual = (self.pd_bucket['delta_kg/m2'].values - self.residual) /\
-                            self.SEC_IN_YEAR / self.rho
+                mb_annual = self.pd_bucket['delta_kg/m2'].copy().values
+                mb_annual = (mb_annual - self.residual) / self.SEC_IN_YEAR / self.rho
                 # update to one year later ...
                 if bucket_output:
                     # copy because we want to output the bucket that is not yet updated!!!
@@ -2431,11 +2408,9 @@ class TIModel_Sfc_Type(TIModel_Parent):
                 self.pd_bucket = self._add_delta_mb_vary_melt_f(heights,
                                                                 year=year,
                                                                 climate_resol='monthly')
-                # ?Fabi: if I want to have it in two lines, can I then  still put the .copy() away?
-                #mb_month = self.pd_bucket['delta_kg/m2'].copy().values
-                #mb_month -= self.residual * self.SEC_IN_MONTH / self.SEC_IN_YEAR
-                mb_month = self.pd_bucket['delta_kg/m2'].values - \
-                           self.residual * self.SEC_IN_MONTH / self.SEC_IN_YEAR
+                mb_month = self.pd_bucket['delta_kg/m2'].copy().values
+
+                mb_month -= self.residual * self.SEC_IN_MONTH / self.SEC_IN_YEAR
                 # need to flatten for mb_pseudo_daily otherwise it gives the wrong shape
                 mb_month = mb_month.flatten() / self.SEC_IN_MONTH / self.rho
                 # save the mass-balance to pd_mb_monthly
@@ -2467,14 +2442,11 @@ class TIModel_Sfc_Type(TIModel_Parent):
                 # year is in float year here
                 self.pd_bucket = self._add_delta_mb_vary_melt_f(heights, year=year,
                                                                 climate_resol='monthly')
-                #fabi copy problem same here
-                #mb_month = self.pd_bucket['delta_kg/m2'].copy().values
+                mb_month = self.pd_bucket['delta_kg/m2'].copy().values
 
                 # residual is in mm w.e per year, so SEC_IN_MONTH .. but mb_month
                 # should be per month!
-                #mb_month -= self.residual * self.SEC_IN_MONTH / self.SEC_IN_YEAR
-                mb_month = self.pd_bucket['delta_kg/m2'].values - \
-                           self.residual * self.SEC_IN_MONTH / self.SEC_IN_YEAR
+                mb_month -= self.residual * self.SEC_IN_MONTH / self.SEC_IN_YEAR
                 # flattening for mb_pseudo_daily otherwise it gives the wrong shape
                 mb_month = mb_month.flatten() / self.SEC_IN_MONTH / self.rho
                 #todo: if add_climate:
@@ -2918,18 +2890,13 @@ class ConstantMassBalance_TIModel(MassBalanceModel):
             self.mbmod.reset_pd_mb_bucket(init_model_fls=init_model_fls)
     @lazy_property
     def interp_yr(self, **kwargs):
-        #todo: there is a problem with **kwargs and fls, but need kwargs for spinup params
+        #todo: there is a problem with **kargs and fls, but need kwargs for spinup params
         # when using TIModel_Sfc_Type
         # annual MB
         mb_on_h = self.hbins*0.
         for yr in self.years:
             if self.mbmod.__class__ == TIModel_Sfc_Type:
                 # just compute once the bucket distribution, then assume t
-                if self.mbmod.spinup_yrs == 0:
-                #    # because we can only indirectly "transmit" it from lazy_property
-                    kwargs['spinup'] = False
-                else:
-                    kwargs['spinup'] = True
                 mb_on_h += self.mbmod.get_annual_mb(self.hbins[::-1],
                                                     year=yr, **kwargs)
             else:
@@ -3046,8 +3013,7 @@ class ConstantMassBalance_TIModel(MassBalanceModel):
         else:
             yr, m = floatyear_to_date(year)
             if add_climate:
-                t, tmelt, prcp, prcpsol = self.get_monthly_climate(heights,
-                                                                   year=year)
+                t, tmelt, prcp, prcpsol = self.get_monthly_climate(heights, year=year)
                 return self.interp_m[m-1](heights), t, tmelt, prcp, prcpsol
             return self.interp_m[m-1](heights)
 
@@ -3072,35 +3038,15 @@ class ConstantMassBalance_TIModel(MassBalanceModel):
             mb = mb_on_h / len(self.years)
             #mb = self.interp_yr(heights)            #raise NotImplementedError('need to implement it for TIModel_Sfc_Type')
         else:
-            use_new = True
-            if use_new:
-                if self.mbmod.__class__ == TIModel_Sfc_Type and 'spinup' in kwargs:
-                    #try:
-                    #    kwargs_2 = kwargs['spinup']
-                    # remove the fls kwargs if inside
-                    #if 'fls' in kwargs:
-                    #    kwargs.pop('fls')
-                    if not kwargs['spinup']:
-                        # if spinup_yrs is = 0, it is the same as saying spinup=False
-                        # but it can be "transmitted" to the lazy-property self.interp_yr
-                        # (just transmitting the kwargs gave an error such as:
-                        # TypeError: __call__() got an unexpected keyword argument 'spinup'
-                        # mb = self.interp_yr(heights, **kwargs)
-
-                        self.mbmod.spinup_yrs = 0
-                #else:
-                #    #todo test if this works at tleast for TIModel
-                mb = self.interp_yr(heights)
+            if self.mbmod.__class__ == TIModel_Sfc_Type:
+                #try:
+                #    kwargs_2 = kwargs['spinup']
+                # remove the fls kwargs
+                kwargs.pop('fls')
+                mb = self.interp_yr(heights, **kwargs)
             else:
-                if self.mbmod.__class__ == TIModel_Sfc_Type:
-                    # try:
-                    #    kwargs_2 = kwargs['spinup']
-                    # remove the fls kwargs
-                    kwargs.pop('fls')
-                    mb = self.interp_yr(heights, **kwargs)
-                else:
-                    # todo test if this works at tleast for TIModel
-                    mb = self.interp_yr(heights)
+                #todo test if this works at tleast for TIModel
+                mb = self.interp_yr(heights)
 
         pd_out = pd.DataFrame({'yr': year, 'heights': heights, 'mb': mb})
         self._mb_debug_container = self._mb_debug_container.append(pd_out)
@@ -3721,12 +3667,6 @@ class RandomMassBalance_TIModel(MassBalanceModel):
                 raise InvalidWorkflowError('check availability should be false for get_annual_mb in '
                                        'RandomMassBalance_TIModel!!! sth. goes wrong!!!')
         _mb = self.mbmod.get_annual_mb(heights, year=ryr, **kwargs)
-        # if add_climate is True we only want to save the mb inside of the debug container!
-        if 'add_climate' in kwargs.keys():
-            if kwargs['add_climate']:
-                _mb_spec = _mb[0]
-        else:
-            _mb_spec = _mb
-        pd_out = pd.DataFrame({'yr': year, 'ryr': ryr, 'heights': heights, 'mb': _mb_spec})
+        pd_out = pd.DataFrame({'yr':year, 'ryr':ryr, 'heights':heights, 'mb':_mb})
         self._mb_debug_container = self._mb_debug_container.append(pd_out)
         return _mb
