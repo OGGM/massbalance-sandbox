@@ -748,6 +748,7 @@ class Test_geodetic_sfc_type:
 
         assert mb_gradient_0_5_m > mb_gradient_no_sfc_type
 
+    @pytest.mark.skip(reason="need refreezing first")
     @pytest.mark.parametrize('mb_type', ['mb_monthly', 'mb_pseudo_daily',
                                          'mb_real_daily'
                                          ])
