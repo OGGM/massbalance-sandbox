@@ -34,10 +34,13 @@ ALL_DIAGS = ['volume', 'volume_bsl', 'volume_bwl', 'area', 'length',
 #    diag = gdir.get_diagnostics()
 #    return {k: diag[k] for k in ('inversion_glen_a', 'inversion_fs')}
 
-
+# because of some reason the hydro test does not work anymore when using random MB
+# the problem is inside of run_with_hydro when running add_climate
 class Test_hydro:
-    #    @pytest.mark.slow
-    @pytest.mark.parametrize('store_monthly_hydro', [False, True], ids=['annual', 'monthly'])
+    #@pytest.mark.slow
+    @pytest.mark.parametrize('store_monthly_hydro',
+                             [False, True],
+                             ids=['annual', 'monthly'])
     def test_hydro_out_random_oggm_core(self, gdir,  # inversion_params,
                                         store_monthly_hydro):
         # TODO: need to make this test compatible !!!
@@ -49,6 +52,7 @@ class Test_hydro:
         pf = 2
         climate_type = 'W5E5'
         mb_type = 'mb_real_daily'
+        # does NOT work for 'real_daily' for that need hydro_daily function of Sarah
         grad_type = 'var_an_cycle'
         ###
         if climate_type == 'W5E5':
