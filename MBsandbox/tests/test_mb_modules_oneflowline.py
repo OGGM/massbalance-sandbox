@@ -6,7 +6,9 @@ Created on Thu Dec 17 18:34:35 2020
 @author: lilianschuster
 """
 
-# tests for mass balances
+# tests for mass balances:
+# tests for methods of mb_modules_oneflowline.py
+# and for help_func.py
 import warnings
 warnings.filterwarnings("once", category=DeprecationWarning)  # noqa: E402
 
@@ -18,7 +20,7 @@ import scipy
 import xarray as xr
 import pandas as pd
 from calendar import monthrange
-
+import os
 
 # imports from OGGM
 import oggm
@@ -31,10 +33,10 @@ from oggm.utils import date_to_floatyear
 from MBsandbox.wip.help_func_geodetic import minimize_bias_geodetic
 # imports from MBsandbox package modules
 from MBsandbox.help_func import (compute_stat, minimize_bias,
-                                 optimize_std_quot_brentq)
+                                 optimize_std_quot_brentq,
+                                 melt_f_calib_geod_prep_inversion)
 
 from MBsandbox.mbmod_daily_oneflowline import (process_era5_daily_data,
-                                               process_w5e5_data,
                                                TIModel, TIModel_Sfc_Type)
 from MBsandbox.mbmod_daily_oneflowline import (process_w5e5_data,
                                                AvgClimateMassBalance_TIModel,
@@ -795,6 +797,7 @@ class Test_geodetic_sfc_type:
 
 class Test_geodetic_hydro1:
     # classes have to be upper case in order that they
+    # all tests with hydro_month = 1
     def test_hydro_years_HEF(self, gdir):
         # only very basic test, the other stuff is done in oggm man basis
         # test if it also works for hydro_month ==1, necessary for geodetic mb
@@ -882,11 +885,202 @@ class Test_geodetic_hydro1:
             # prcp_fac can be quite different ...
             #assert_allclose(prcp_facs[0], prcp_facs[1])
 
+    def test_melt_f_calib_geod_prep_inversion(self):
+
+        # choose glaciers where we can not find a melt_f easily
+        # all except for the last one do not work without
+        # correcting the reference height
+        cfg.initialize()
+        cfg.PARAMS['use_multiprocessing'] = False
+        cfg.PARAMS['hydro_month_nh'] = 1
+        grad_type = 'cte'
+        mb_type = 'mb_real_daily'
+        climate_type = 'W5E5'  # W5E5
+        temporal_resol = 'daily'
+        # climate dataset goes till end of 2019
+        ye = 2020
+        pf = 2
+
+        # use elevation band  flowlines
+        base_url = ('https://cluster.klima.uni-bremen.de/~oggm/gdirs/oggm_v1.4/'
+                    'L1-L2_files/elev_bands')
+
+
+        test_dir = '/home/lilianschuster/Schreibtisch/PhD/oggm_files/MBsandbox_tests'
+        if not os.path.exists(test_dir):
+            test_dir = utils.gettempdir(dirname='OGGM_MBsandbox_test',
+                                        reset=True)
+
+        cfg.PATHS['working_dir'] = test_dir
+        dfi =  ['RGI60-14.16678',
+                'RGI60-14.08183',
+                'RGI60-14.02796',
+                'RGI60-14.08190']
+        gdirs = workflow.init_glacier_directories(dfi,
+                                                  from_prepro_level=2,
+                                                  prepro_border=10,
+                                                  prepro_base_url=base_url,
+                                                  prepro_rgi_version='62')
+
+        workflow.execute_entity_task(tasks.compute_downstream_line, gdirs)
+        workflow.execute_entity_task(tasks.compute_downstream_bedshape, gdirs)
+
+        for gdiri in gdirs:
+            process_w5e5_data(gdiri, temporal_resol=temporal_resol,
+                              climate_type=climate_type)
+            melt_f_calib_geod_prep_inversion(gdiri, pf = pf,  # precipitation factor
+                                             mb_type = mb_type,
+                                             grad_type = grad_type,
+                                             climate_type = climate_type,
+                                             residual = 0,
+                                             ye = ye)
+
+            fs1 = '_{}_{}'.format(temporal_resol, climate_type)
+            fpath = gdiri.get_filepath('climate_historical', filesuffix=fs1)
+            with utils.ncDataset(fpath, 'a') as nc:
+                corrected_ref_hgt = nc.ref_hgt
+                uncorrected_ref_hgt = nc.uncorrected_ref_hgt
+
+            fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
+            d = gdiri.read_json(filename='melt_f_geod', filesuffix=fs)
+            assert d['melt_f_pf_{}'.format(np.round(pf, 2))] > 10
+            assert d['melt_f_pf_{}'.format(np.round(pf, 2))] < 1000
+            # check if the historical climate file altitude is corrected as
+            # we expect it
+            # e.g. if no corrections, should be zero!
+            assert_allclose(d['ref_hgt_calib_diff'],
+                            corrected_ref_hgt - uncorrected_ref_hgt)
+
+            if d['ref_hgt_calib_diff'] < 0:
+                # if the climate was too warm for the observations
+                # the melt_f  should be rather low (somewhere near 10)
+                assert d['melt_f_pf_{}'.format(np.round(pf, 2))] < 100
+                # the climate gridpoint altitude should be lower than
+                # before the correction
+                assert corrected_ref_hgt < uncorrected_ref_hgt
+            elif d['ref_hgt_calib_diff'] > 0:
+                # if the climate was too warm for the observations
+                # the melt_f should be rather high (somewhere below 1000)
+                assert d['melt_f_pf_{}'.format(np.round(pf, 2))] > 900
+                # the climate gridpoint altitude should be higher than
+                # before the correction
+                assert corrected_ref_hgt > uncorrected_ref_hgt
+
+    def test_daily_monthly_annual_specific_mb(self, gdir):
+        # for both ERA5 and WFDE5
+
+        cfg.PARAMS['hydro_month_nh'] = 1 # 0
+        h, w = gdir.get_inversion_flowline_hw()
+
+        grad_type = 'cte'
+        for dataset in ['ERA5', 'WFDE5_CRU']:
+            if dataset == 'ERA5':
+                pf = 2.5
+            elif dataset == 'WFDE5_CRU':
+                pf = 1
+            for mb_type in ['mb_monthly', 'mb_real_daily']:
+                if mb_type == 'mb_real_daily' and dataset == 'ERA5':
+                    climate = 'ERA5_daily'
+                    cfg.PARAMS['baseline_climate'] = climate
+                    fs = '_daily_ERA5_daily'
+                    process_era5_daily_data(gdir,
+                                            output_filesuffix=fs)
+                elif mb_type == 'mb_real_daily' and dataset == 'WFDE5_CRU':
+                    climate = dataset
+                    fs='_daily_WFDE5_CRU'
+                    process_w5e5_data(gdir, climate_type=climate,
+                                      temporal_resol='daily')
+                elif mb_type == 'mb_monthly' and dataset == 'ERA5':
+                    climate = 'ERA5dr'
+                    cfg.PARAMS['baseline_climate'] = climate
+                    fs = '_monthly_ERA5dr'
+                    oggm.shop.ecmwf.process_ecmwf_data(gdir,
+                                                       dataset=climate,
+                                                       output_filesuffix=fs)
+                elif mb_type == 'mb_monthly' and dataset == 'WFDE5_CRU':
+                    climate = dataset
+                    fs = '_monthly_WFDE5_CRU'
+                    process_w5e5_data(gdir, climate_type=dataset,
+                                      temporal_resol='monthly')
+                gd_mb = TIModel(gdir, 200, mb_type=mb_type, grad_type=grad_type,
+                                prcp_fac=pf, input_filesuffix=fs,
+                                baseline_climate=climate)
+
+                spec_mb_annually = gd_mb.get_specific_mb(heights=h, widths=w,
+                                                         year=np.arange(1980,
+                                                                        2019))
+
+                # check if annual and monthly mass balance are the same
+                ann_mb = gd_mb.get_annual_mb(heights=h, year=2015)
+                mon_mb_sum = 0
+                for m in np.arange(1, 13):
+                    mon_mb_sum += gd_mb.get_monthly_mb(heights=h,
+                                                       year=date_to_floatyear(
+                                                           2015, m))
+                np.testing.assert_allclose(mon_mb_sum / 12, ann_mb, rtol=1e-4)
+
+                if mb_type == 'mb_real_daily':
+
+                    # test if the climate output of monthly
+                    # and daily/annual is the same
+                    # by just looking at the first month
+                    clim_ann = gd_mb._get_2d_annual_climate(h, 2015)
+                    clim_mon = gd_mb._get_2d_monthly_climate(h, 2015.0)
+                    T_mon_from_ann = clim_ann[0][:, :np.shape(clim_mon[0])[1]]
+                    np.testing.assert_allclose(T_mon_from_ann, clim_mon[0],
+                                               rtol=1e-6)
+                    Tfmelt_mon_from_ann = clim_ann[1][:,
+                                          :np.shape(clim_mon[1])[1]]
+                    np.testing.assert_allclose(Tfmelt_mon_from_ann,
+                                               clim_mon[1], rtol=1e-6)
+                    prcp_mon_from_ann = clim_ann[2][:,
+                                        :np.shape(clim_mon[2])[1]]
+                    np.testing.assert_allclose(prcp_mon_from_ann,
+                                               clim_mon[2], rtol=1e-6)
+                    prcp_mon_from_ann = clim_ann[2][:,
+                                        :np.shape(clim_mon[2])[1]]
+                    np.testing.assert_allclose(prcp_mon_from_ann,
+                                               clim_mon[2], rtol=1e-6)
+                    solidprcp_mon_from_ann = clim_ann[3][:,
+                                             :np.shape(clim_mon[3])[1]]
+                    np.testing.assert_allclose(solidprcp_mon_from_ann,
+                                               clim_mon[3], rtol=1e-6)
+
+                    # check if daily and annual mass balance are the same
+                    # problem:
+                    # as get_daily_mb accounts as well for leap years,
+                    # doy are not 365.25 as in get_annual_mb but the amount
+                    # of days of the year in reality!!!
+                    # (needed for hydro model of Sarah Hanus)
+                    # therefore we increased here rtol !!!
+                    # but why are the differences in spec_mb so large this so large?
+                    # @Fabi: can we do something about that?
+                    day_mb = gd_mb.get_daily_mb(heights=h, year=2015)
+                    day_mb_yearly_sum = []
+                    for mb in day_mb:
+                        day_mb_yearly_sum.append(mb.mean())
+                    # problem: day_mb_yearly_sum is a bit smaller than ann_mb
+                    np.testing.assert_allclose(day_mb_yearly_sum, ann_mb,
+                                               rtol=1e-4) # would need 2e-2)
+
+                    # check if daily and yearly specific mb are the same?
+                    spec_mb_daily = gd_mb.get_specific_daily_mb(heights=h,
+                                                                widths=w,
+                                                                year=np.arange(
+                                                                    1980, 2019))
+                    spec_mb_daily_yearly_sum = []
+                    for mb in spec_mb_daily:
+                        spec_mb_daily_yearly_sum.append(mb.sum())
+                    np.testing.assert_allclose(spec_mb_daily_yearly_sum,
+                                               spec_mb_annually,
+                                               rtol=1e-4) # would need 5e-2
+
 # %%
 # start it again to have the default hydro_month
 class Test_directobs_hydro10:
     def test_minimize_bias(self, gdir):
 
+        cfg.PARAMS['hydro_month_nh'] = 10
         # important to initialize again, otherwise hydro_month_nh=1
         # therefore gdir is included here
         # from test_hydro_years_HEF...
@@ -911,7 +1105,7 @@ class Test_directobs_hydro10:
                 input_filesuffix = '_daily_ERA5'
             else:
                 input_filesuffix = '_monthly_ERA5dr'
-            melt_f_opt = scipy.optimize.brentq(minimize_bias, 1, 10000,
+            melt_f_opt = scipy.optimize.brentq(minimize_bias, 10, 1000,
                                                disp=True, xtol=0.1,
                                                 args=(gd_mb, gdir,
                                                   pf, False, input_filesuffix))
@@ -919,7 +1113,8 @@ class Test_directobs_hydro10:
             hgts, widths = gdir.get_inversion_flowline_hw()
             mbdf = gdir.get_ref_mb_data(input_filesuffix=input_filesuffix)
             # check if they give the same optimal DDF
-            assert np.round(mu_star_opt_cte[mb_type]/melt_f_opt, 3) == 1
+            np.testing.assert_allclose(np.round(mu_star_opt_cte[mb_type]/melt_f_opt, 4),
+                                       1, rtol=1e-3)
 
             gd_mb.melt_f = melt_f_opt
             gd_mb.historical_climate_qc_mod(gdir)
@@ -937,6 +1132,7 @@ class Test_directobs_hydro10:
     def test_optimize_std_quot_brentq_ERA5dr(self, gdir):
         # check if double optimisation of bias and std_quotient works
 
+        cfg.PARAMS['hydro_month_nh'] = 10
         grad_type = 'cte'
         N = 100
         for mb_type in ['mb_real_daily', 'mb_monthly', 'mb_pseudo_daily']:
@@ -986,7 +1182,7 @@ class Test_directobs_hydro10:
     def test_TIModel_monthly(self, gdir):
         # check if massbalance.PastMassBalance equal to TIModel with cte
         # gradient and mb_monthly as options for lapse rate mb_type
-
+        cfg.PARAMS['hydro_month_nh'] = 10
         mu_star_opt_cte_var = 195.5484547754791
         # if I use ERA5dr in PastMassBalance, it applies automatically the
         # gradient that changes with time and location
@@ -1033,6 +1229,7 @@ class Test_directobs_hydro10:
     # but somehow the test for ref_mb_profile() is not equal
     def test_present_time_glacier_massbalance(self, gdir):
 
+        cfg.PARAMS['hydro_month_nh'] = 10
         # check if area of  HUSS flowlines corresponds to the rgi area
         N = 100
         h, w = gdir.get_inversion_flowline_hw()
@@ -1126,6 +1323,8 @@ class Test_directobs_hydro10:
         # I think there is a problem with SEC_IN_MONTH/SEC_IN_YEAR ...
         # do this for all model types
         # ONLY TEST it for ERA5dr or ERA5_daily!!!
+
+        cfg.PARAMS['hydro_month_nh'] = 10
         N = 100
         for climate in ['ERA5dr', 'ERA5_daily']:
             for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_real_daily']:
@@ -1198,103 +1397,6 @@ class Test_directobs_hydro10:
                                                     my_mon_mb_on_h),
                                             0, atol=50)
 
-    def test_daily_monthly_annual_specific_mb(self, gdir):
-        # for both ERA5 and WFDE5
-        h, w = gdir.get_inversion_flowline_hw()
-
-        grad_type = 'cte'
-        for dataset in ['ERA5', 'WFDE5_CRU']:
-            if dataset == 'ERA5':
-                pf = 2.5
-            elif dataset == 'WFDE5_CRU':
-                pf = 1
-            for mb_type in ['mb_monthly', 'mb_real_daily']:
-                if mb_type == 'mb_real_daily' and dataset == 'ERA5':
-                    climate = 'ERA5_daily'
-                    cfg.PARAMS['baseline_climate'] = climate
-                    fs = '_daily_ERA5_daily'
-                    process_era5_daily_data(gdir,
-                                            output_filesuffix=fs)
-                elif mb_type == 'mb_real_daily' and dataset == 'WFDE5_CRU':
-                    climate = dataset
-                    fs='_daily_WFDE5_CRU'
-                    process_w5e5_data(gdir, climate_type=climate,
-                                      temporal_resol='daily')
-                elif mb_type == 'mb_monthly' and dataset == 'ERA5':
-                    climate = 'ERA5dr'
-                    cfg.PARAMS['baseline_climate'] = climate
-                    fs = '_monthly_ERA5dr'
-                    oggm.shop.ecmwf.process_ecmwf_data(gdir,
-                                                       dataset=climate,
-                                                       output_filesuffix=fs)
-                elif mb_type == 'mb_monthly' and dataset == 'WFDE5_CRU':
-                    climate = dataset
-                    fs='_monthly_WFDE5_CRU'
-                    process_w5e5_data(gdir, climate_type=dataset,
-                                      temporal_resol='monthly')
-                gd_mb = TIModel(gdir, 200, mb_type=mb_type, grad_type=grad_type,
-                                prcp_fac=pf, input_filesuffix=fs,
-                                baseline_climate=climate)
-
-                spec_mb_annually = gd_mb.get_specific_mb(heights=h, widths=w,
-                                                         year=np.arange(1980,
-                                                                        2019))
-                if mb_type == 'mb_real_daily':
-                    # check if daily and yearly specific mb are the same?
-                    spec_mb_daily = gd_mb.get_specific_daily_mb(heights=h,
-                                                                widths=w,
-                                                                year=np.arange(
-                                                                    1980, 2019))
-                    spec_mb_daily_yearly_sum = []
-                    for mb in spec_mb_daily:
-                        spec_mb_daily_yearly_sum.append(mb.sum())
-                    np.testing.assert_allclose(spec_mb_daily_yearly_sum,
-                                               spec_mb_annually, rtol=1e-4)
-
-                # check if annual and monthly mass balance are the same
-                ann_mb = gd_mb.get_annual_mb(heights=h, year=2015)
-                mon_mb_sum = 0
-                for m in np.arange(1, 13):
-                    mon_mb_sum += gd_mb.get_monthly_mb(heights=h,
-                                                       year=date_to_floatyear(
-                                                           2015, m))
-                np.testing.assert_allclose(mon_mb_sum / 12, ann_mb, rtol=1e-4)
-
-                if mb_type == 'mb_real_daily':
-                    # check if daily and annual mass balance are the same
-                    day_mb = gd_mb.get_daily_mb(heights=h, year=2015)
-                    day_mb_yearly_sum = []
-                    for mb in day_mb:
-                        day_mb_yearly_sum.append(mb.mean())
-                    np.testing.assert_allclose(day_mb_yearly_sum, ann_mb,
-                                               rtol=1e-4)
-
-                if mb_type == 'mb_real_daily':
-                    # test if the climate output of monthly
-                    # and daily/annual is the same
-                    # by just looking at the first month
-                    clim_ann = gd_mb._get_2d_annual_climate(h, 2015)
-                    clim_mon = gd_mb._get_2d_monthly_climate(h, 2015.0)
-                    T_mon_from_ann = clim_ann[0][:, :np.shape(clim_mon[0])[1]]
-                    np.testing.assert_allclose(T_mon_from_ann, clim_mon[0],
-                                               rtol=1e-6)
-                    Tfmelt_mon_from_ann = clim_ann[1][:,
-                                          :np.shape(clim_mon[1])[1]]
-                    np.testing.assert_allclose(Tfmelt_mon_from_ann,
-                                               clim_mon[1], rtol=1e-6)
-                    prcp_mon_from_ann = clim_ann[2][:,
-                                        :np.shape(clim_mon[2])[1]]
-                    np.testing.assert_allclose(prcp_mon_from_ann,
-                                               clim_mon[2], rtol=1e-6)
-                    prcp_mon_from_ann = clim_ann[2][:,
-                                        :np.shape(clim_mon[2])[1]]
-                    np.testing.assert_allclose(prcp_mon_from_ann,
-                                               clim_mon[2], rtol=1e-6)
-                    solidprcp_mon_from_ann = clim_ann[3][:,
-                                             :np.shape(clim_mon[3])[1]]
-                    np.testing.assert_allclose(solidprcp_mon_from_ann,
-                                               clim_mon[3], rtol=1e-6)
-
     def test_loop(self, gdir):
         # tests whether ERA5dr works better with or without loop in mb_pseudo_daily
         # tests that both option give same results and in case that default
@@ -1302,6 +1404,8 @@ class Test_directobs_hydro10:
 
         # this could be optimised and included in the above tests
         # cfg.initialize()
+
+        cfg.PARAMS['hydro_month_nh'] = 10
 
         climate = 'ERA5dr'
         mb_type = 'mb_pseudo_daily'
@@ -1382,6 +1486,8 @@ class Test_directobs_hydro10:
         # is similar to observed mass balances
 
         # this could be optimised and included in the above tests
+
+        cfg.PARAMS['hydro_month_nh'] = 10
         climate = 'ERA5dr'
         mb_type = 'mb_pseudo_daily'
         cfg.PARAMS['baseline_climate'] = 'ERA5dr'
@@ -1420,6 +1526,7 @@ class Test_directobs_hydro10:
 
     def test_prcp_fac_update(self, gdir):
 
+        cfg.PARAMS['hydro_month_nh'] = 10
         cfg.PARAMS['baseline_climate'] = 'ERA5dr'
         oggm.shop.ecmwf.process_ecmwf_data(gdir, dataset='ERA5dr',
                                            )
@@ -1448,6 +1555,7 @@ class Test_directobs_hydro10:
 
     def test_historical_climate_qc_mon(self, gdir):
 
+        cfg.PARAMS['hydro_month_nh'] = 10
         h, w = gdir.get_inversion_flowline_hw()
         for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_real_daily']:
             for grad_type in ['cte', 'var_an_cycle']:

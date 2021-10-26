@@ -150,6 +150,9 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
         # get the calibrated melt_f that suits to the prcp factor
         try:
             melt_f_chosen = d['melt_f_pf_{}'.format(np.round(precipitation_factor, 2))]
+            # get the corrected ref_hgt so that we can apply this again on the mb model
+            # if otherwise not melt_f could be found!
+            ref_hgt_calib_diff = d['ref_hgt_calib_diff']
         except:
             raise InvalidWorkflowError('there is no calibrated melt_f for this precipitation factor, glacier, climate'
                                        'mb_type and grad_type, need to run first melt_f_calib_geod_prep_inversion'
@@ -179,6 +182,14 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
 
     if temperature_bias is not None:
         mb.temp_bias = temperature_bias
+
+
+    if melt_f == 'from_json':
+        # instead of the quality check we corrected the height already inside of
+        # melt_f_calib_geod_prep_inversion if no suitable melt_f was found
+        # let's just check if this has worked
+        np.testing.assert_allclose(ref_hgt_calib_diff,
+                        mb.flowline_mb_models[-1].ref_hgt - mb.flowline_mb_models[-1].uncorrected_ref_hgt)
     else:
         # do the quality check!
         mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
@@ -194,7 +205,7 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
         fls = copy.deepcopy(init_model_fls)
 
     if reset and mb_model_sub_class == TIModel_Sfc_Type:
-            mb.flowline_mb_models[-1].reset_pd_mb_bucket(init_model_fls = fls)
+        mb.flowline_mb_models[-1].reset_pd_mb_bucket(init_model_fls = fls)
 
     return flowline_model_run(gdir, output_filesuffix=output_filesuffix,
                               mb_model=mb, ys=ys, ye=ye,
@@ -297,6 +308,7 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         # get the calibrated melt_f that suits to the prcp factor
         try:
             melt_f_chosen = d['melt_f_pf_{}'.format(np.round(precipitation_factor, 2))]
+            ref_hgt_calib_diff = d['ref_hgt_calib_diff']
         except:
             raise InvalidWorkflowError('there is no calibrated melt_f for this precipitation factor, glacier, climate'
                                        'mb_type and grad_type, need to run first melt_f_calib_geod_prep_inversion'
@@ -328,6 +340,13 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         mb.prcp_fac = precipitation_factor
     if temperature_bias is not None:
         mb.temp_bias = temperature_bias
+
+    if melt_f == 'from_json':
+        # instead of the quality check we corrected the height already inside of
+        # melt_f_calib_geod_prep_inversion if no suitable melt_f was found
+        # let's just check if this has worked
+        np.testing.assert_allclose(ref_hgt_calib_diff,
+                        mb.flowline_mb_models[-1].mbmod.ref_hgt - mb.flowline_mb_models[-1].mbmod.uncorrected_ref_hgt)
     else:
         # do the quality check!
         mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
@@ -468,6 +487,7 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         # get the calibrated melt_f that suits to the prcp factor
         try:
             melt_f_chosen = d['melt_f_pf_{}'.format(np.round(precipitation_factor, 2))]
+            ref_hgt_calib_diff = d['ref_hgt_calib_diff']
         except:
             raise InvalidWorkflowError('there is no calibrated melt_f for this precipitation factor, glacier, climate'
                                        'mb_type and grad_type, need to run first melt_f_calib_geod_prep_inversion'
@@ -505,9 +525,18 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         mb.prcp_fac = precipitation_factor
     if temperature_bias is not None:
         mb.temp_bias = temperature_bias
+
+    if melt_f == 'from_json':
+        # instead of the quality check we corrected the height already inside of
+        # melt_f_calib_geod_prep_inversion if no suitable melt_f was found
+        # let's just check if this has worked)
+        np.testing.assert_allclose(ref_hgt_calib_diff,
+                                   mb.flowline_mb_models[-1].mbmod.ref_hgt - mb.flowline_mb_models[
+                                       -1].mbmod.uncorrected_ref_hgt)
     else:
         # do the quality check!
         mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
+
     if init_model_fls is None:
         fls = gdir.read_pickle('model_flowlines')
     else:

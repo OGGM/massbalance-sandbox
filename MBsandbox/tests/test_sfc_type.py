@@ -18,13 +18,6 @@ from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel,
 from MBsandbox.wip.projections_bayescalibration import process_isimip_data
 
 
-# get the geodetic calibration data
-url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
-path = utils.file_downloader(url)
-pd_geodetic = pd.read_csv(path, index_col='rgiid')
-pd_geodetic = pd_geodetic.loc[pd_geodetic.period == '2000-01-01_2020-01-01']
-
-
 class Test_sfc_type_run:
     #@pytest.mark.parametrize(update=['annual', 'monthly'])
     @pytest.mark.parametrize("melt_f_update", ['annual', 'monthly'])
@@ -344,7 +337,7 @@ class Test_sfc_type_run:
                                          pf=pf,  # precipitation factor
                                          mb_type=mb_type, grad_type=grad_type,
                                          climate_type=climate_type, residual=0,
-                                         path_geodetic=path, ye=ye_calib,
+                                         ye=ye_calib,
                                          mb_model_sub_class=TIModel_Sfc_Type,
                                          kwargs_for_TIModel_Sfc_Type=kwargs_for_TIModel_Sfc_Type)
         # make sure melt factor is within a range
