@@ -16,10 +16,6 @@ from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel,
 
 
 # get the geodetic calibration data
-url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
-path = utils.file_downloader(url)
-pd_geodetic = pd.read_csv(path, index_col='rgiid')
-pd_geodetic = pd_geodetic.loc[pd_geodetic.period == '2000-01-01_2020-01-01']
 
 DOM_BORDER = 80
 
@@ -74,7 +70,7 @@ class Test_hydro:
                                          pf=pf,  # precipitation factor
                                          mb_type=mb_type, grad_type=grad_type,
                                          climate_type=climate_type, residual=0,
-                                         path_geodetic=path, ye=ye)
+                                         ye=ye)
         #make sure melt factor is within a range
         fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
         melt_f = gdir.read_json(filename='melt_f_geod', filesuffix=fs).get('melt_f_pf_2')
@@ -215,7 +211,7 @@ class Test_hydro:
                                          pf=pf,  # precipitation factor
                                          mb_type=mb_type, grad_type=grad_type,
                                          climate_type=climate_type, residual=0,
-                                         path_geodetic=path, ye=ye)
+                                         ye=ye)
         #make sure melt factor is within a range
         fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
         melt_f = gdir.read_json(filename='melt_f_geod', filesuffix=fs).get('melt_f_pf_2')
@@ -320,7 +316,7 @@ class Test_hydro:
         #assert_allclose(frac, 0, atol=0.06)  # annual can be large (prob)
 
     # @pytest.mark.slow
-    @pytest.mark.parametrize('mb_run', ['cte', 'random', 'hist', ])
+    @pytest.mark.parametrize('mb_run', ['hist', 'cte', 'random' ])
     @pytest.mark.parametrize('mb_type', ['mb_monthly', 'mb_real_daily'])
     def test_hydro_monthly_vs_annual_from_oggm_core(self, gdir,  # inversion_params,
                                                     mb_run, mb_type):
@@ -350,7 +346,7 @@ class Test_hydro:
                                          pf=pf,  # precipitation factor
                                          mb_type=mb_type, grad_type=grad_type,
                                          climate_type=climate_type, residual=0,
-                                         path_geodetic=path, ye=ye)
+                                         ye=ye)
 
         # here just calibrate a-factor to that single glacier
         workflow.execute_entity_task(tasks.compute_downstream_line, [gdir])
@@ -538,7 +534,7 @@ class Test_hydro:
                                          pf=pf,  # precipitation factor
                                          mb_type=mb_type, grad_type=grad_type,
                                          climate_type=climate_type, residual=0,
-                                         path_geodetic=path, ye=ye)
+                                         ye=ye)
 
         # here just calibrate a-factor to that single glacier
         workflow.execute_entity_task(tasks.compute_downstream_line, [gdir])

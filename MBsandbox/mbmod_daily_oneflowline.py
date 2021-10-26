@@ -1705,6 +1705,10 @@ class TIModel(TIModel_Parent):
                      add_climate=False):
         """computes daily mass balance in m of ice per second
 
+        attention this accounts as well for leap years, hence
+        doy are not 365.25 as in get_annual_mb but the amount of days the year
+        has in reality!!! (needed for hydro model of Sarah Hanus)
+
         year has to be given as float hydro year from what the month is taken,
         hence year 2000 -> y=2000, m = 1, & year = 2000.09, y=2000, m=2 ...
         which corresponds to the real year 1999 an months October or November
