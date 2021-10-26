@@ -1716,7 +1716,7 @@ class TIModel(TIModel_Parent):
             out = self._get_2d_daily_climate(heights, year)
             t, temp2dformelt, prcp, prcpsol = out
             # days of year
-            doy = 365.25 #len(prcpsol.T)
+            doy = len(prcpsol.T)  # 365.25
             # assert doy > 360
             # to have the same unit of melt_f, which is
             # the monthly temperature sensitivity (kg /m² /mth /K),
@@ -1730,7 +1730,7 @@ class TIModel(TIModel_Parent):
 
             # residual is in mm w.e per year, so SEC_IN_MONTH .. but mb_daily
             # is per day!
-            mb_daily -= self.residual * self.SEC_IN_DAY / self.SEC_IN_YEAR
+            mb_daily -= self.residual * doy
             # this is for mb_daily otherwise it gives the wrong shape
             # mb_daily = mb_month.flatten()
             # instead of SEC_IN_MONTH, use instead len(prcpsol.T)==daysinmonth
@@ -2655,6 +2655,16 @@ class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
         """Residual bias to apply to the original series."""
         for mbmod in self.flowline_mb_models:
             mbmod.residual = value
+
+    def get_daily_mb(self, heights, year=None, fl_id=None, **kwargs):
+
+        if fl_id is None:
+            raise ValueError('`fl_id` is required for '
+                             'MultipleFlowlineMassBalance!')
+
+        return self.flowline_mb_models[fl_id].get_daily_mb(heights,
+                                                             year=year,
+                                                             **kwargs)
 
     def get_monthly_mb(self, heights, year=None, fl_id=None, **kwargs):
 
