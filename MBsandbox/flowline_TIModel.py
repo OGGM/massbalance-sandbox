@@ -182,14 +182,17 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
 
     if temperature_bias is not None:
         mb.temp_bias = temperature_bias
-    #else:
-    #    # do the quality check!
-    #    mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
-    # instead of the quality check we corrected the height already inside of
-    # melt_f_calib_geod_prep_inversion if no suitable melt_f was found
-    # let's just check if this has worked
-    np.testing.assert_allclose(ref_hgt_calib_diff,
-                    mb.flowline_mb_models[-1].ref_hgt - mb.flowline_mb_models[-1].uncorrected_ref_hgt)
+
+
+    if melt_f == 'from_json':
+        # instead of the quality check we corrected the height already inside of
+        # melt_f_calib_geod_prep_inversion if no suitable melt_f was found
+        # let's just check if this has worked
+        np.testing.assert_allclose(ref_hgt_calib_diff,
+                        mb.flowline_mb_models[-1].ref_hgt - mb.flowline_mb_models[-1].uncorrected_ref_hgt)
+    else:
+        # do the quality check!
+        mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
 
     if ye is None:
         # Decide from climate (we can run the last year with data as well)
@@ -338,15 +341,15 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
     if temperature_bias is not None:
         mb.temp_bias = temperature_bias
 
-    #else:
-    #    # do the quality check!
-    #    mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
-    # instead of the quality check we corrected the height already inside of
-    # melt_f_calib_geod_prep_inversion if no suitable melt_f was found
-    # let's just check if this has worked
-    np.testing.assert_allclose(ref_hgt_calib_diff,
-                    mb.flowline_mb_models[-1].ref_hgt - mb.flowline_mb_models[-1].uncorrected_ref_hgt)
-
+    if melt_f == 'from_json':
+        # instead of the quality check we corrected the height already inside of
+        # melt_f_calib_geod_prep_inversion if no suitable melt_f was found
+        # let's just check if this has worked
+        np.testing.assert_allclose(ref_hgt_calib_diff,
+                        mb.flowline_mb_models[-1].ref_hgt - mb.flowline_mb_models[-1].uncorrected_ref_hgt)
+    else:
+        # do the quality check!
+        mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
 
     if init_model_fls is None:
         fls = gdir.read_pickle('model_flowlines')
@@ -523,15 +526,15 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
     if temperature_bias is not None:
         mb.temp_bias = temperature_bias
 
-    #else:
-    #    # do the quality check!
-    #    mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
-    # instead of the quality check we corrected the height already inside of
-    # melt_f_calib_geod_prep_inversion if no suitable melt_f was found
-    # let's just check if this has worked
-    np.testing.assert_allclose(ref_hgt_calib_diff,
-                    mb.flowline_mb_models[-1].ref_hgt - mb.flowline_mb_models[-1].uncorrected_ref_hgt)
-
+    if melt_f == 'from_json':
+        # instead of the quality check we corrected the height already inside of
+        # melt_f_calib_geod_prep_inversion if no suitable melt_f was found
+        # let's just check if this has worked
+        np.testing.assert_allclose(ref_hgt_calib_diff,
+                        mb.flowline_mb_models[-1].ref_hgt - mb.flowline_mb_models[-1].uncorrected_ref_hgt)
+    else:
+        # do the quality check!
+        mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
 
     if init_model_fls is None:
         fls = gdir.read_pickle('model_flowlines')
