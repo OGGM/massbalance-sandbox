@@ -12,7 +12,8 @@ from MBsandbox.mbmod_daily_oneflowline import process_w5e5_data, TIModel_Sfc_Typ
 from MBsandbox.help_func import melt_f_calib_geod_prep_inversion
 from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel,
                                         run_random_climate_TIModel,
-                                        run_constant_climate_TIModel)
+                                        run_constant_climate_TIModel,
+                                        run_with_hydro_daily)
 
 
 # get the geodetic calibration data
@@ -228,7 +229,7 @@ class Test_hydro:
         workflow.execute_entity_task(tasks.init_present_time_glacier, [gdir])
 
         ###
-        tasks.run_with_hydro_daily(gdir, run_task=run_random_climate_TIModel,
+        run_with_hydro_daily(gdir, run_task=run_random_climate_TIModel,
                              seed=0, nyears=100, y0=2003 - 5, halfsize=5,
                              output_filesuffix='_rand',
                              melt_f='from_json',
@@ -241,12 +242,26 @@ class Test_hydro:
             sel_vars = [v for v in ds.variables if 'day_2d' not in ds[v].dims]
             odf = ds[sel_vars].to_dataframe().iloc[:-1]
 
+        # Check that compiling also works
+        ds_comp = utils.compile_run_output([gdir], input_filesuffix='_rand')
+        ds_comp = ds_comp.isel(rgi_id=0)
+
         # Sanity checks
+        tot_yearly_prcp = (ds_comp['liq_prcp_on_glacier_daily'] +
+                           ds_comp['liq_prcp_off_glacier_daily'] +
+                           ds_comp['snowfall_on_glacier_daily'] +
+                           ds_comp['snowfall_off_glacier_daily']
+                           )
+        tot_yearly_prcp = tot_yearly_prcp.sum(dim='day_2d')
+
         # Tot prcp here is constant (constant climate) -> only for run with constant climate
         odf['tot_prcp'] = (odf['liq_prcp_off_glacier'] +
                            odf['liq_prcp_on_glacier'] +
                            odf['snowfall_off_glacier'] +
                            odf['snowfall_on_glacier'])
+
+        # This checks that the compile run output from oggm core also works
+        assert_allclose(odf['tot_prcp'], tot_yearly_prcp.data[:-1])
 
         # Glacier area is the same (remove on_area?)
         assert_allclose(odf['on_area'], odf['area_m2'])
@@ -568,7 +583,7 @@ class Test_hydro:
                                  precipitation_factor=pf,
                                  climate_input_filesuffix=climate_type,
                                  mb_type=mb_type, grad_type=grad_type)
-            tasks.run_with_hydro_daily(gdir, run_task=run_random_climate_TIModel,
+            run_with_hydro_daily(gdir, run_task=run_random_climate_TIModel,
                                  Testing=True,
                                  bias=mb_bias,
                                  seed=0, nyears=100, y0=2014, halfsize=5,
@@ -594,7 +609,7 @@ class Test_hydro:
                                  precipitation_factor=pf,
                                  climate_input_filesuffix=climate_type,
                                  mb_type=mb_type, grad_type=grad_type)
-            tasks.run_with_hydro_daily(gdir, run_task=run_from_climate_data_TIModel,
+            run_with_hydro_daily(gdir, run_task=run_from_climate_data_TIModel,
                                  Testing=True,
                                  bias=mb_bias,
                                  min_ys=1980, output_filesuffix='_daily',
