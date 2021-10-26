@@ -326,9 +326,6 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
     ref_hgt correction into a json file inside of the glacier directory
 
     This has to be run before e.g. `run_from_climate_data_TIModel` !
-    TODO: at the moment run_from_climate_data_TIModel has not been changed,
-    this has to be changed first in such a way that it uses the right corrected ref_hgt!!!
-    and that it does NOT anymore use the quality check way !!!
 
     Parameters
     ----------
