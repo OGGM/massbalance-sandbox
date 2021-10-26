@@ -263,10 +263,12 @@ def process_gcm_data_adv_monthly(gdir, output_filesuffix='', prcp=None,
             # observed/gcm
             std_fac = dsclimobs.temp.groupby('time.month').std(
                 dim='time') / ts_tmp_std
-            # if sm =1, this just changes nothing as it should
             assert np.all(std_fac == std_fac.roll(month=13 - sm,
                                                   roll_coords=True))
-            std_fac = std_fac.roll(month=13 - sm, roll_coords=True)
+            # if sm =1, this just changes nothing as it should
+            if sm != 1:
+                # just to avoid useless roll (same as in process_gcm_data now)
+                std_fac = std_fac.roll(month=13 - sm, roll_coords=True)
             std_fac = np.tile(std_fac.data, len(temp) // 12)
             # We need an even number of years for this to work
             if ((len(ts_tmp_sel) // 12) % 2) == 1:
@@ -373,12 +375,12 @@ def process_gcm_data_adv_monthly(gdir, output_filesuffix='', prcp=None,
         assert np.all(np.isfinite(ts_pre.values))
         assert np.all(np.isfinite(ts_tmp.values))
         assert np.all(np.isfinite(ts_dstdtmp.values))
-        #TODO:CHECK that this occurs only very rarely (<100 times )
         #if it occurs not too negative
         amount_neg_std = len(ts_dstdtmp.where(ts_dstdtmp<0, drop=True))
         if amount_neg_std >0:
             print('time points with negative temp std that are clipped'
                   'to 1e-3: {}'.format(amount_neg_std))
+        # CHECK that this occurs only very rarely (<10 times )
         assert amount_neg_std < 10
         assert np.min(ts_dstdtmp) > -0.5
 

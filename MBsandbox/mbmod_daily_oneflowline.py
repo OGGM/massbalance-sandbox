@@ -36,9 +36,12 @@ from oggm.utils import (floatyear_to_date, date_to_floatyear, ncDataset,
                         lazy_property, monthly_timeseries,
                         clip_min, clip_array)
 from oggm.utils._funcs import haversine
+from oggm.utils._workflow import global_task
+
 from oggm.exceptions import InvalidParamsError, InvalidWorkflowError
 from oggm.shop.ecmwf import get_ecmwf_file, BASENAMES
 from oggm.core.massbalance import MassBalanceModel
+
 
 # Module logger
 log = logging.getLogger(__name__)
@@ -72,7 +75,8 @@ BASENAMES['MSWEP_daily'] = {
 
 def get_w5e5_file(dataset='W5E5_daily', var=None,
                   server='https://cluster.klima.uni-bremen.de/~lschuster/'):
-    """returns a path to desired WFDE5_CRU or W5E5 or MSWEP baseline climate file.
+    """returns a path to desired WFDE5_CRU or W5E5 or MSWEP
+     baseline climate file.
 
     If the file is not present, downloads it
 
@@ -91,7 +95,7 @@ def get_w5e5_file(dataset='W5E5_daily', var=None,
 
     # File to look for
     return utils.file_downloader(server + BASENAMES[dataset][var])
-# this could be used in general
+
 def write_climate_file(gdir, time, prcp, temp,
                        ref_pix_hgt, ref_pix_lon, ref_pix_lat,
                        ref_pix_lon_pr=None, ref_pix_lat_pr=None,
@@ -102,6 +106,8 @@ def write_climate_file(gdir, time, prcp, temp,
                        filesuffix='',
                        temporal_resol='monthly'):
     """Creates a netCDF4 file with climate data timeseries.
+    this could be used in general
+
 
     Parameters
     ----------
@@ -839,10 +845,12 @@ class TIModel_Parent(MassBalanceModel):
     """ Parent class that works for different temperature-index models, this is only instanciated
     via the child classes TIModel or TIModel_Sfc_Type, just container with shared code
     to get annual, monthly and daily climate ... the actual mass balance can only be computed in child classes
-    TODO: change documentation
-    Different mass balance modules compatible to OGGM with one flowline
 
-    so far this is only tested for the Huss flowlines
+    Different mass balance modules compatible to OGGM with one flowline,
+    so far this is only tested for the elevation-band flowlines
+
+    TODO: improve  documentation
+
     """
 
     def __init__(self, gdir, melt_f, prcp_fac=2.5, residual=0,
@@ -878,9 +886,8 @@ class TIModel_Parent(MassBalanceModel):
             opposite to OGGM "MB terms + residual"
         mb_type: str
             three types: 'mb_pseudo_daily' (default: use temp_std and N percentiles),
-            'mb_monthly' (same as default OGGM mass balance),
+            'mb_monthly' (same as default OGGM PastMassBalance),
             'mb_real_daily' (use daily temperature values).
-            OGGM "MB terms + residual"
             the mb_type only work if the baseline_climate of gdir is right
         N : int
             number of percentiles used to generate gaussian-like daily
@@ -1772,7 +1779,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
         '''
         TIModel with surface type distinction using a bucket system
 
-        ... work in process ...
         Parameters
         ----------
         melt_f_ratio_snow_to_ice
@@ -1785,8 +1791,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
             and 5 firn buckets with yearly melt factor updates. If monthly,
             each month the snow is ageing over the amount of spinup years
             (default 6yrs, i.e., 72 months).
-            Melt factors are interpolated linearly inbetween the buckets.
-            TODO: include non-linear melt factor change!
         spinup_yrs : int
             amount of years to compute as spinup (if spinup=True in
             get_annual_mb or get_monthly_mb) before computing the actual year.
@@ -1794,17 +1798,24 @@ class TIModel_Sfc_Type(TIModel_Parent):
             to be filled (as we have 1 snow bucket and 5 firn buckets, or
             72 monthly buckets)
         tau_e_fold_yr : float
-            default is 0.5, only used if melt_f_change is 'neg_exp', it describes how fast the snow melt
+            default is 0.5, only used if melt_f_change is 'neg_exp',
+            it describes how fast the snow melt
             factor approximates to the ice melt factor via
             melt_f = melt_f_ice + (melt_f_snow - melt_f_ice)* np.exp(-time_yr/tau_e_fold_yr) # s: in months
             do not set to 0, otherwise the melt_f of the first bucket is np.NaN
         melt_f_change : str
-            default is linear, how the snow melt factor changes to the ice melt factor, either 'linear'
+            default is linear,
+            how the snow melt factor changes to the ice melt factor, either 'linear'
             or 'neg_exp' (see `tau_e_fold_yr` for the equation)
         check_availability: boolean
             default is True, checks if year / month has already been computed, if true it gives that output.
             This ensures to give always the same values for a specific year/month and is also faster.
             However, in case of random_climate or constant_climate, we have to set this to False!!!
+        interpolation_optim: todo
+            default is False
+
+        hbins: todo,
+            default is np.NaN, todo
         kwargs
         '''
         super().__init__(gdir, melt_f, **kwargs)
@@ -2550,8 +2561,12 @@ class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
         gdir : GlacierDirectory
             the glacier directory
         fls :
-        melt_f :
-        prcp-fac :
+        melt_f : float
+            melt factor
+            (has to be set to a value!)
+        prcp-fac : float
+            multiplicative precipitation factor
+            (has to be set to a value)
         mb_model_class : class, optional
             the mass-balance model to use (e.g. PastMassBalance,
             ConstantMassBalance...)
@@ -2826,7 +2841,8 @@ class ConstantMassBalance_TIModel(MassBalanceModel):
 
 
         if y0 is None:
-            raise InvalidWorkflowError('need to set y0 as we do not use tstar in this case')
+            raise InvalidWorkflowError('need to set y0 as we do not '
+                                       'use tstar in this case')
         # This is a quick'n dirty optimisation
         try:
             fls = gdir.read_pickle('model_flowlines')
@@ -2928,9 +2944,6 @@ class ConstantMassBalance_TIModel(MassBalanceModel):
             self.mbmod.reset_pd_mb_bucket(init_model_fls=init_model_fls)
     @lazy_property
     def interp_yr(self, **kwargs):
-        #todo: there is a problem with **kwargs and fls, but need kwargs for spinup params
-        # when using TIModel_Sfc_Type
-        # annual MB
         mb_on_h = self.hbins*0.
         for yr in self.years:
             if self.mbmod.__class__ == TIModel_Sfc_Type:
@@ -2944,8 +2957,6 @@ class ConstantMassBalance_TIModel(MassBalanceModel):
                                                     year=yr, **kwargs)
             else:
                 mb_on_h += self.mbmod.get_annual_mb(self.hbins, year=yr)
-        #print(mb_on_h, len(self.years))
-        #print(interp1d(self.hbins[::-1], mb_on_h / len(self.years)))
         if self.mbmod.__class__ == TIModel_Sfc_Type:
             return interp1d(self.hbins, mb_on_h[::-1]/ len(self.years))
         else:
@@ -3211,11 +3222,8 @@ class AvgClimateMassBalance_TIModel(ConstantMassBalance_TIModel):
             #        pok = pok & (self.mbmod.years <= y0 + halfsize)
             #    except TypeError:
             #        pok = self.mbmod.years <= y0 + halfsize
-        #print(len(pok))
         tmp = self.mbmod.temp[pok]
-        #print(self.mbmod.ys, self.mbmod.ye)
-        #print((len(tmp) // 12))
-        #print((halfsize * 2 + 1))
+
         assert (len(tmp) // 12) == (halfsize * 2 + 1)
 
         self.mbmod.temp = tmp.reshape((len(tmp) // 12, 12)).mean(axis=0)
@@ -3236,19 +3244,18 @@ class AvgClimateMassBalance_TIModel(ConstantMassBalance_TIModel):
         self.years = np.asarray([y0]*12)
 
 
-
-
 @entity_task(log)
-def fixed_geometry_mass_balance_TIModel(gdir, ys=None, ye=None, years=None,
+def fixed_geometry_mass_balance_TIModel(gdir, ys=None, ye=None,
+                                        years=None,
                                 monthly_step=False,
                                 use_inversion_flowlines=True,
                                 climate_filename='climate_historical',
                                 climate_input_filesuffix='',
                                 ds_gcm = None,
                                 **kwargs):
-    """Computes the mass-balance with climate input from e.g. CRU or a GCM.
+    """Computes the mass-balance with climate input
+    from e.g. CRU or a GCM.
 
-    TODO: do documentation
     Parameters
     ----------
     gdir : :py:class:`oggm.GlacierDirectory`
@@ -3306,7 +3313,6 @@ def fixed_geometry_mass_balance_TIModel(gdir, ys=None, ye=None, years=None,
     return odf
 
 
-from oggm.utils._workflow import global_task
 @global_task(log)
 def compile_fixed_geometry_mass_balance_TIModel(gdirs, filesuffix='',
                                         path=True, csv=False,
