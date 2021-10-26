@@ -15,6 +15,7 @@ from oggm.core import climate
 import pandas as pd
 import logging
 from oggm import utils, workflow, tasks, entity_task
+from oggm.exceptions import MassBalanceCalibrationError
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +26,13 @@ from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel, run_const
                                         run_random_climate_TIModel)
 
 
-# %%
+from oggm import cfg
+
+# necessary for
+_doc = 'the calibrated melt_f according to the geodetic data with the ' \
+       'chosen precipitation factor'
+cfg.BASENAMES['melt_f_geod'] = ('melt_f_geod.json', _doc)
+
 def minimize_bias(x, gd_mb=None, gdir_min=None,
                   pf=None, absolute_bias=False, input_filesuffix=''):
     """ calibrates the melt factor (melt_f) by getting the bias to zero
@@ -299,55 +306,216 @@ def optimize_std_quot_brentq(x, gd_mb=None,
 
 
 ###
-from oggm import cfg
-_doc = 'the calibrated melt_f according to the geodetic data with the ' \
-       'chosen precipitation factor'
-cfg.BASENAMES['melt_f_geod'] = ('melt_f_geod.json', _doc)
 
-# TODO:@entity_task(log) -> allows multi-processing
-#  but at the moment still gives an error
-#  AttributeError: Can't get attribute 'melt_f_calib_geod_prep_inversion' on <module '__main__'>
-#  Process ForkPoolWorker-3:
+
 @entity_task(log)
 def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte',
                                      pf=None, climate_type='W5E5',
-                                     residual=0, path_geodetic=None, ye=None,
+                                     residual=0, ye=None,
                                      mb_model_sub_class=TIModel,
                                      kwargs_for_TIModel_Sfc_Type={},
-                                     spinup=True):
+                                     spinup=True,
+                                     min_melt_f=10,
+                                     max_melt_f=1000,
+                                     step_height_for_corr=25,
+                                     max_height_change_for_corr=3000,
+                                     ):
     """ calibrates the melt factor using the TIModel mass-balance model,
     computes the apparent mass balance for the inversion
-    and saves the melt_f and the applied pf into a json inside of the glacier directory
+    and saves the melt_f, the applied pf and the possible climate data
+    ref_hgt correction into a json file inside of the glacier directory
 
-    TODO: make documentation
+    This has to be run before e.g. `run_from_climate_data_TIModel` !
+    TODO: at the moment run_from_climate_data_TIModel has not been changed,
+    this has to be changed first in such a way that it uses the right corrected ref_hgt!!!
+    and that it does NOT anymore use the quality check way !!!
+
+    Parameters
+    ----------
+    gdir : :py:class:`oggm.GlacierDirectory`
+        the glacier directory to process
+    mb_type: str
+            three types: 'mb_pseudo_daily' (default: use temp_std and N percentiles),
+            'mb_monthly' (same as default OGGM PastMassBalance),
+            'mb_real_daily' (use daily temperature values).
+            the mb_type only work if the baseline_climate of gdir is right
+    grad_type : str
+            three types of applying the temperature gradient:
+            'cte' (default, constant lapse rate, set to default_grad,
+                   same as in default OGGM)
+            'var_an_cycle' (varies spatially and over annual cycle,
+                            but constant over the years)
+            'var' (varies spatially & temporally as in the climate files, deprecated!)
+    pf : float
+        multiplicative precipitation factor, has to be calibrated for each option and
+        each climate dataset,
+        (no default value, has to be set)
+    climate_type : str
+        which climate to use, default is 'W5E5'
+        (the one that has been preprocessed before)
+    residual : float
+        default is zero, do not change this !
+    ye : int
+        the last year +1 ! that should be used for calibration,
+        for W5E5, default is 2020, as the climate data goes till end 2019
+    mb_model_sub_class : class, optional
+            the mass-balance model to use: either TIModel (default)
+            or TIModel_Sfc_Type
+    kwargs_for_TIModel_Sfc_Type : {}
+        stuff passed to the TIModel_Sfc_Type instance!
+    spinup : bool, optional
+        default is True, only used
+        when mb_model_sub_class is TIModel_Sfc_Type
+    min_melt_f: float, optional
+        minimum melt factor that is allowed
+        default is 10, can also be set higher (e.g. 60)
+        unit is (kg /m² /mth /K)
+    max_melt_f: float, optional
+        minimum melt factor that is allowed
+        default is 1000, can also be set lower (e.g. 600)
+        unit is (kg /m² /mth /K)
+    step_height_for_corr: float, optional
+        step altitude change to correct climate gridpoint reference height
+        default is 25 meters
+    max_height_change_for_corr: float, optional
+        maximum change of altitude that is allowed to correct the climate
+        gridpoint, default is 3000 meters
+
     """
+    # my old method
     # get the geodetic data
-    pd_geodetic = pd.read_csv(path_geodetic, index_col='rgiid')
-    pd_geodetic = pd_geodetic.loc[pd_geodetic.period == '2000-01-01_2020-01-01']
+   # pd_geodetic = pd.read_csv(path_geodetic, index_col='rgiid')
+    #pd_geodetic = pd_geodetic.loc[pd_geodetic.period == '2000-01-01_2020-01-01']
     # for that glacier
-    mb_geodetic = pd_geodetic.loc[gdir.rgi_id].dmdtda * 1000  # want it to be in kg/m2
+    #mb_geodetic = pd_geodetic.loc[gdir.rgi_id].dmdtda * 1000  # want it to be in kg/m2
+
+    # new method that uses the corrected geodetic MB:
+    mb_geodetic = utils.get_geodetic_mb_dataframe().loc[gdir.rgi_id]
+    ref_period = '2000-01-01_2020-01-01'
+    mb_geodetic = float(mb_geodetic.loc[mb_geodetic['period'] == ref_period]['dmdtda'])
+    # dmdtda: in meters water-equivalent per year -> we convert
+    mb_geodetic *= 1000  # kg m-2 yr-1
 
     # instantiate the mass-balance model
     # this is used instead of the melt_f
     mb_mod = mb_model_sub_class(gdir, None, mb_type=mb_type,
                                 grad_type=grad_type,
-                     baseline_climate=climate_type, residual=residual,
+                                baseline_climate=climate_type, residual=residual,
                                 **kwargs_for_TIModel_Sfc_Type)
 
+
+    # old:
     # if necessary add a temperature bias (reference height change)
-    mb_mod.historical_climate_qc_mod(gdir)
+    # mb_mod.historical_climate_qc_mod(gdir),
+    # instead do sth. similar but only when no melt_f found ...
+    # see below
+
+    if mb_type != 'mb_real_daily':
+        temporal_resol = 'monthly'
+    else:
+        temporal_resol = 'daily'
+    fs = '_{}_{}'.format(temporal_resol, climate_type)
+
+    fpath = gdir.get_filepath('climate_historical', filesuffix=fs)
+    with utils.ncDataset(fpath, 'a') as nc:
+        start = getattr(nc, 'uncorrected_ref_hgt', nc.ref_hgt)
+        nc.uncorrected_ref_hgt = start
+        nc.ref_hgt = start
 
     # do the climate calibration:
-
-    # and get here the right melt_f fitting to that precipitation factor
+    # get here the right melt_f fitting to that precipitation factor
     h, w = gdir.get_inversion_flowline_hw()
     # find the melt factor that minimises the bias to the geodetic observations
-    melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
-                                       disp=True, xtol=0.1,
-                                       args=(mb_mod, mb_geodetic, h, w,
-                                             pf, False,
-                                             np.arange(2000, ye, 1),  # time period that we want to calibrate
-                                             False, spinup))
+    try:
+        melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic,
+                                           min_melt_f,
+                                           max_melt_f,
+                                           disp=True, xtol=0.1,
+                                           args=(mb_mod, mb_geodetic, h, w,
+                                                 pf, False,
+                                                 np.arange(2000, ye, 1),  # time period that we want to calibrate
+                                                 False, spinup))
+        # we don't need and reference height correction if melt_f calibration has worked!
+        ref_hgt_calib_diff = 0
+    except ValueError or TypeError:
+        # This happens when out of bounds
+        # same methods as in mu_star_calibration_from_geodetic_mb applied
+        # Check in which direction we should correct the temp
+        _lim0 = minimize_bias_geodetic(min_melt_f, gd_mb=mb_mod,
+                                       mb_geodetic=mb_geodetic,
+                                       h=h, w=w, pf=pf,
+                                       ys=np.arange(2000, ye, 1))
+        # _lim0 = modelled - observed(geodetic)
+
+
+        if _lim0 < 0:
+            # The mass-balances are too positive to be matched - we need to
+            # cool down the climate data
+            # here we lower the reference height of the climate gridpoint
+            # hence the difference between glacier and ref_hgt of climate data
+            # gets higher
+            step = -step_height_for_corr
+            end = -max_height_change_for_corr
+        else:
+            # The other way around
+            step = step_height_for_corr
+            end = max_height_change_for_corr
+
+        steps = np.arange(start, start + end, step, dtype=np.int64)
+        melt_f_candidates = steps * np.NaN
+        for i, ref_h in enumerate(steps):
+            with utils.ncDataset(fpath, 'a') as nc:
+                nc.ref_hgt = ref_h
+                # problem, climate needs to be read in again??
+                # fabi???
+                # I guess, I need to change the ref_hgt of the mb_mod
+                # in order that this works for me!!!
+            mb_mod.ref_hgt = ref_h
+            try:
+                melt_f = scipy.optimize.brentq(minimize_bias_geodetic,
+                                               min_melt_f,
+                                               max_melt_f,
+                                               disp=True, xtol=0.1,
+                                               args=(mb_mod, mb_geodetic, h,
+                                                     w, pf, False,
+                                                     np.arange(2000, ye, 1),
+                                                     # time period that we want to calibrate
+                                                     False, spinup))
+                # @Fabi, if we find one working melt_f we could actually stop
+                # the loop, or???
+            except ValueError or TypeError:
+                melt_f = np.NaN
+                # Done - store for later
+            melt_f_candidates[i] = melt_f
+
+        # only choose those that worked
+        sel_steps = steps[np.isfinite(melt_f_candidates)]
+        sel_melt_f = melt_f_candidates[np.isfinite(melt_f_candidates)]
+        if len(sel_melt_f) == 0:
+            # Yeah nothing we can do here
+            raise MassBalanceCalibrationError('We could not find a way to '
+                                              'correct the climate data and '
+                                              'fit within the prescribed '
+                                              'bounds for mu*.')
+
+        # Now according to all the corrections we have a series of candidates
+        # Her we just pick the first, but to be fair it is arbitrary
+        # We could also pick one randomly...
+        # @fabi: do we take the first one because this is the
+        # nearest to the ref_hgt???
+        melt_f_opt = sel_melt_f[0]
+        # Final correction of the data
+        with utils.ncDataset(fpath, 'a') as nc:
+            nc.ref_hgt = sel_steps[0]
+        ref_hgt_calib_diff = sel_steps[0] - start
+        gdir.add_to_diagnostics('ref_hgt_calib_diff',
+                                ref_hgt_calib_diff)
+        mb_mod.ref_hgt = sel_steps[0]
+
+        #raise NotImplementedError('needs actually to be debugged, tested and'
+        #                      'checked')
+
+
     mb_mod.melt_f = melt_f_opt
     mb_mod.prcp_fac = pf
 
@@ -357,14 +525,18 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
     np.testing.assert_allclose(mb_geodetic, spec_mb, rtol=1e-2)
     if mb_model_sub_class == TIModel_Sfc_Type:
         mb_mod.reset_pd_mb_bucket()
-    # Todo: which starting year if set to 1979 I get problems !!!
+    # Fabi?: which starting year? I set it to 2000 !!!
     # get the apparent_mb (necessary for inversion)
     climate.apparent_mb_from_any_mb(gdir, mb_model=mb_mod,
                                     mb_years=np.arange(2000, ye, 1))
+
     # TODO: maybe also add type of mb_model_sub_class into fs ???
-    fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
-    d = {'melt_f_pf_{}'.format(np.round(pf, 2)): melt_f_opt}
-    gdir.write_json(d, filename='melt_f_geod', filesuffix=fs)
+    # TODO: also need to add ref_hgt
+    fs_new = '_{}_{}_{}'.format(climate_type, mb_type,
+                                   grad_type)
+    d = {'melt_f_pf_{}'.format(np.round(pf, 2)): melt_f_opt,
+         'ref_hgt_calib_diff':  ref_hgt_calib_diff }
+    gdir.write_json(d, filename='melt_f_geod', filesuffix=fs_new)
 
 
 def calib_inv_run(gdir=np.NaN, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'linear',

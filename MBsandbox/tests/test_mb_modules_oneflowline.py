@@ -6,7 +6,9 @@ Created on Thu Dec 17 18:34:35 2020
 @author: lilianschuster
 """
 
-# tests for mass balances
+# tests for mass balances:
+# tests for methods of mb_modules_oneflowline.py
+# and for help_func.py
 import warnings
 warnings.filterwarnings("once", category=DeprecationWarning)  # noqa: E402
 
@@ -18,7 +20,7 @@ import scipy
 import xarray as xr
 import pandas as pd
 from calendar import monthrange
-
+import os
 
 # imports from OGGM
 import oggm
@@ -31,10 +33,10 @@ from oggm.utils import date_to_floatyear
 from MBsandbox.wip.help_func_geodetic import minimize_bias_geodetic
 # imports from MBsandbox package modules
 from MBsandbox.help_func import (compute_stat, minimize_bias,
-                                 optimize_std_quot_brentq)
+                                 optimize_std_quot_brentq,
+                                 melt_f_calib_geod_prep_inversion)
 
 from MBsandbox.mbmod_daily_oneflowline import (process_era5_daily_data,
-                                               process_w5e5_data,
                                                TIModel, TIModel_Sfc_Type)
 from MBsandbox.mbmod_daily_oneflowline import (process_w5e5_data,
                                                AvgClimateMassBalance_TIModel,
@@ -881,6 +883,88 @@ class Test_geodetic_hydro1:
             assert_allclose(melt_fs[0], melt_fs[1], rtol=0.2)
             # prcp_fac can be quite different ...
             #assert_allclose(prcp_facs[0], prcp_facs[1])
+
+    def test_melt_f_calib_geod_prep_inversion(self):
+
+        # choose glaciers where we can not find a melt_f easily
+        # all except for the last one do not work without
+        # correcting the reference height
+        cfg.initialize()
+        cfg.PARAMS['use_multiprocessing'] = False
+        cfg.PARAMS['hydro_month_nh'] = 1
+        grad_type = 'cte'
+        mb_type = 'mb_real_daily'
+        climate_type = 'W5E5'  # W5E5
+        temporal_resol = 'daily'
+        # climate dataset goes till end of 2019
+        ye = 2020
+        pf = 2
+
+        # use elevation band  flowlines
+        base_url = ('https://cluster.klima.uni-bremen.de/~oggm/gdirs/oggm_v1.4/'
+                    'L1-L2_files/elev_bands')
+
+
+        test_dir = '/home/lilianschuster/Schreibtisch/PhD/oggm_files/MBsandbox_tests'
+        if not os.path.exists(test_dir):
+            test_dir = utils.gettempdir(dirname='OGGM_MBsandbox_test',
+                                        reset=True)
+
+        cfg.PATHS['working_dir'] = test_dir
+        dfi =  ['RGI60-14.16678',
+                'RGI60-14.08183',
+                'RGI60-14.02796',
+                'RGI60-14.08190']
+        gdirs = workflow.init_glacier_directories(dfi,
+                                                  from_prepro_level=2,
+                                                  prepro_border=10,
+                                                  prepro_base_url=base_url,
+                                                  prepro_rgi_version='62')
+
+        workflow.execute_entity_task(tasks.compute_downstream_line, gdirs)
+        workflow.execute_entity_task(tasks.compute_downstream_bedshape, gdirs)
+
+        for gdir in gdirs:
+            process_w5e5_data(gdir, temporal_resol=temporal_resol,
+                              climate_type=climate_type)
+            melt_f_calib_geod_prep_inversion(gdir, pf = pf,  # precipitation factor
+                                             mb_type = mb_type,
+                                             grad_type = grad_type,
+                                             climate_type = climate_type,
+                                             residual = 0,
+                                             ye = ye)
+
+            fs1 = '_{}_{}'.format(temporal_resol, climate_type)
+            fpath = gdir.get_filepath('climate_historical', filesuffix=fs1)
+            with utils.ncDataset(fpath, 'a') as nc:
+                corrected_ref_hgt = nc.ref_hgt
+                uncorrected_ref_hgt = nc.uncorrected_ref_hgt
+
+            fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
+            d = gdir.read_json(filename='melt_f_geod', filesuffix=fs)
+            assert d['melt_f_pf_{}'.format(np.round(pf, 2))] > 10
+            assert d['melt_f_pf_{}'.format(np.round(pf, 2))] < 1000
+            # check if the historical climate file altitude is corrected as
+            # we expect it
+            # e.g. if no corrections, should be zero!
+            assert_allclose(d['ref_hgt_calib_diff'],
+                            corrected_ref_hgt - uncorrected_ref_hgt)
+
+            if d['ref_hgt_calib_diff'] < 0:
+                # if the climate was too warm for the observations
+                # the melt_f  should be rather low (somewhere near 10)
+                assert d['melt_f_pf_{}'.format(np.round(pf, 2))] < 100
+                # the climate gridpoint altitude should be lower than
+                # before the correction
+                assert corrected_ref_hgt < uncorrected_ref_hgt
+            elif d['ref_hgt_calib_diff'] > 0:
+                # if the climate was too warm for the observations
+                # the melt_f should be rather high (somewhere below 1000)
+                assert d['melt_f_pf_{}'.format(np.round(pf, 2))] > 900
+                # the climate gridpoint altitude should be higher than
+                # before the correction
+                assert corrected_ref_hgt > uncorrected_ref_hgt
+
 
 # %%
 # start it again to have the default hydro_month
