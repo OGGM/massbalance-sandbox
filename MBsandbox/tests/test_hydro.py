@@ -8,10 +8,11 @@ import pytest
 from numpy.testing import assert_allclose
 
 # import the MBsandbox modules
-from MBsandbox.mbmod_daily_oneflowline import process_w5e5_data
+from MBsandbox.mbmod_daily_oneflowline import process_w5e5_data, TIModel_Sfc_Type
 from MBsandbox.help_func import melt_f_calib_geod_prep_inversion
 from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel,
-                                        run_random_climate_TIModel)
+                                        run_random_climate_TIModel,
+                                        run_constant_climate_TIModel)
 
 
 # get the geodetic calibration data
@@ -34,12 +35,16 @@ ALL_DIAGS = ['volume', 'volume_bsl', 'volume_bwl', 'area', 'length',
 #    diag = gdir.get_diagnostics()
 #    return {k: diag[k] for k in ('inversion_glen_a', 'inversion_fs')}
 
+# because of some reason the hydro test does not work anymore when using random MB
+# the problem is inside of run_with_hydro when running add_climate
 qualitative_tests = False
 tests_melt_off_glacier = False
 class Test_hydro:
-#    @pytest.mark.slow
-    @pytest.mark.parametrize('store_monthly_hydro', [False, True], ids=['annual', 'monthly'])
-    def test_hydro_out_random_oggm_core(self, gdir, #inversion_params,
+    #@pytest.mark.slow
+    @pytest.mark.parametrize('store_monthly_hydro',
+                             [False, True],
+                             ids=['annual', 'monthly'])
+    def test_hydro_out_random_oggm_core(self, gdir,  # inversion_params,
                                         store_monthly_hydro):
         #TODO: need to make this test compatible !!!
 
@@ -48,9 +53,10 @@ class Test_hydro:
         cfg.PARAMS['hydro_month_nh'] = 1
 
         pf = 2
-        climate_type= 'W5E5'
-        mb_type='mb_real_daily'
-        grad_type='var_an_cycle'
+        climate_type = 'W5E5'
+        mb_type = 'mb_real_daily'
+        # does NOT work for 'real_daily' for that need hydro_daily function of Sarah
+        grad_type = 'var_an_cycle'
         ###
         if climate_type == 'W5E5':
             ye = 2020  # till end of 2019
@@ -313,8 +319,8 @@ class Test_hydro:
         #this assertion does not work on other glacier, (e.g. RGI60-11.00890 reaches 0.25!!)
         #assert_allclose(frac, 0, atol=0.06)  # annual can be large (prob)
 
-    #@pytest.mark.slow
-    @pytest.mark.parametrize('mb_run', ['random', 'hist'])
+    # @pytest.mark.slow
+    @pytest.mark.parametrize('mb_run', ['cte', 'random', 'hist', ])
     @pytest.mark.parametrize('mb_type', ['mb_monthly', 'mb_real_daily'])
     def test_hydro_monthly_vs_annual_from_oggm_core(self, gdir,  # inversion_params,
                                                     mb_run, mb_type):
@@ -391,6 +397,25 @@ class Test_hydro:
                                  bias=mb_bias,
                                  store_monthly_hydro=True,
                                  min_ys=1980, output_filesuffix='_monthly',
+                                 melt_f='from_json',
+                                 precipitation_factor=pf,
+                                 climate_input_filesuffix=climate_type,
+                                 mb_type=mb_type, grad_type=grad_type)
+        elif mb_run == 'cte':
+            tasks.run_with_hydro(gdir, run_task=run_constant_climate_TIModel,
+                                 bias=mb_bias,
+                                 store_monthly_hydro=False,
+                                 nyears=20, y0=2003 - 5, halfsize=5,
+                                 output_filesuffix='_annual',
+                                 melt_f='from_json',
+                                 precipitation_factor=pf,
+                                 climate_input_filesuffix=climate_type,
+                                 mb_type=mb_type, grad_type=grad_type)
+            tasks.run_with_hydro(gdir, run_task=run_constant_climate_TIModel,
+                                 bias=mb_bias,
+                                 store_monthly_hydro=True,
+                                 nyears=20, y0=2003 - 5, halfsize=5,
+                                 output_filesuffix='_monthly',
                                  melt_f='from_json',
                                  precipitation_factor=pf,
                                  climate_input_filesuffix=climate_type,

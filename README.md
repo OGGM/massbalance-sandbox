@@ -1,6 +1,28 @@
 # OGGM Mass-Balance sandbox
 
-Next generation of OGGM's mass-balance models. Work in process!
+Next generation of OGGM's mass-balance models. Work in process! 
+
+> You are welcome to discover already some new mass-balance options such as different climate resolutions or surface
+> type distinction. However, we want to make clear that this is 
+> work in process and is part of my 
+> [PhD project](https://www.uibk.ac.at/acinn/research/ice-and-climate/projects/uncertainties-glacier-smb.html.en):
+> - the new mass-balance module from this sandbox is of course less stable, less robust, slower and less documented than the default MBmodel (i.e. the 
+> [PastMassBalance](https://docs.oggm.org/en/stable/_modules/oggm/core/massbalance.html#PastMassBalance) 
+> class in OGGM) 
+> - it has no pre-mass-balance-calibrated `gdirs` 
+> - although I try to include [tests](https://github.com/OGGM/massbalance-sandbox/tree/master/MBsandbox/tests)
+    as I can, they might be less rigorous as the ones from pure OGGM
+> - there is not yet any publication that has used it!
+> 
+> If you can't wait until it is integrated into OGGM default and want to
+> use it already now for your specific OGGM application,
+> please contact me first either by: 
+> - opening an [issue](https://github.com/OGGM/massbalance-sandbox/issues)
+> - writing an [e-mail](mailto:lilian.schuster@student.uibk.ac.at) to me 
+     (Lilian Schuster)
+> - or, the easiest way, discuss it inside of our OGGM slack channel
+
+---
 
 At the moment these **options of climate resolution** are available inside `TIModel`:
 - to compute degree days:

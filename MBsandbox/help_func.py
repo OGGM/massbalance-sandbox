@@ -11,15 +11,19 @@ compute performance statistics
 import scipy
 import matplotlib.pyplot as plt
 import numpy as np
-from oggm import entity_task
 from oggm.core import climate
 import pandas as pd
 import logging
+from oggm import utils, workflow, tasks, entity_task
 
 log = logging.getLogger(__name__)
 
 # imports from local MBsandbox package modules
-from MBsandbox.mbmod_daily_oneflowline import TIModel
+from MBsandbox.mbmod_daily_oneflowline import TIModel, TIModel_Sfc_Type
+# from MBsandbox.help_func import compute_stat, minimize_bias, optimize_std_quot_brentq
+from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel, run_constant_climate_TIModel,
+                                        run_random_climate_TIModel)
+
 
 # %%
 def minimize_bias(x, gd_mb=None, gdir_min=None,
@@ -85,7 +89,7 @@ def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
                            absolute_bias=False,
                            ys=np.arange(2000, 2019, 1),
                            oggm_default_mb=False,
-                           spinup=False):
+                           spinup=True):
     """ calibrates the melt factor (melt_f) by getting the bias to zero
     comparing modelled mean specific mass balance between 2000 and 2020 to
     observed geodetic data
@@ -307,7 +311,10 @@ cfg.BASENAMES['melt_f_geod'] = ('melt_f_geod.json', _doc)
 @entity_task(log)
 def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte',
                                      pf=None, climate_type='W5E5',
-                                     residual=0, path_geodetic=None, ye=None):
+                                     residual=0, path_geodetic=None, ye=None,
+                                     mb_model_sub_class=TIModel,
+                                     kwargs_for_TIModel_Sfc_Type={},
+                                     spinup=True):
     """ calibrates the melt factor using the TIModel mass-balance model,
     computes the apparent mass balance for the inversion
     and saves the melt_f and the applied pf into a json inside of the glacier directory
@@ -322,8 +329,10 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
 
     # instantiate the mass-balance model
     # this is used instead of the melt_f
-    mb_mod = TIModel(gdir, None, mb_type=mb_type, grad_type=grad_type,
-                     baseline_climate=climate_type, residual=residual)
+    mb_mod = mb_model_sub_class(gdir, None, mb_type=mb_type,
+                                grad_type=grad_type,
+                     baseline_climate=climate_type, residual=residual,
+                                **kwargs_for_TIModel_Sfc_Type)
 
     # if necessary add a temperature bias (reference height change)
     mb_mod.historical_climate_qc_mod(gdir)
@@ -333,24 +342,163 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
     # and get here the right melt_f fitting to that precipitation factor
     h, w = gdir.get_inversion_flowline_hw()
     # find the melt factor that minimises the bias to the geodetic observations
-    melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 1, 1000,
+    melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
                                        disp=True, xtol=0.1,
                                        args=(mb_mod, mb_geodetic, h, w,
                                              pf, False,
-                                             np.arange(2000, ye, 1)  # time period that we want to calibrate
-                                             ))
+                                             np.arange(2000, ye, 1),  # time period that we want to calibrate
+                                             False, spinup))
     mb_mod.melt_f = melt_f_opt
     mb_mod.prcp_fac = pf
 
     # just check if calibration worked ...
-    spec_mb = mb_mod.get_specific_mb(heights=h, widths=w, year=np.arange(2000, ye, 1)).mean()
+    spec_mb = mb_mod.get_specific_mb(heights=h, widths=w,
+                                     year=np.arange(2000, ye, 1)).mean()
     np.testing.assert_allclose(mb_geodetic, spec_mb, rtol=1e-2)
-
+    if mb_model_sub_class == TIModel_Sfc_Type:
+        mb_mod.reset_pd_mb_bucket()
+    # Todo: which starting year if set to 1979 I get problems !!!
     # get the apparent_mb (necessary for inversion)
     climate.apparent_mb_from_any_mb(gdir, mb_model=mb_mod,
-                                    mb_years=np.arange(1979, ye, 1))
-
+                                    mb_years=np.arange(2000, ye, 1))
+    # TODO: maybe also add type of mb_model_sub_class into fs ???
     fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
     d = {'melt_f_pf_{}'.format(np.round(pf, 2)): melt_f_opt}
     gdir.write_json(d, filename='melt_f_geod', filesuffix=fs)
+
+
+def calib_inv_run(gdir=np.NaN, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'linear',
+                                               'tau_e_fold_yr': 0.5,
+                                               'spinup_yrs': 6,
+                                               'melt_f_update': 'annual',
+                                               'melt_f_ratio_snow_to_ice': 0.5},
+                  mb_elev_feedback='annual',
+                  nyears=300, seed=0,
+                  spinup=True, interpolation_optim=False, run_type='constant',
+                  mb_model_sub_class=TIModel_Sfc_Type, pf=2, mb_type='mb_monthly',
+                  grad_type='cte', y0=2004, hs=10,
+                  store_monthly_step=False, unique_samples=False, climate_type='W5E5',
+                  ensemble = 'mri-esm2-0_r1i1p1f1', ssp = 'ssp126' ):
+    # ye_h = 2014
+    # y0 = 1979
+    dataset = climate_type
+    #gdirs = [gdir]
+    url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
+    path_geodetic = utils.file_downloader(url)
+
+    ye = 2100
+    ye_calib = 2020
+    nosigmaadd = ''
+    if mb_model_sub_class == TIModel:
+        kwargs_for_TIModel_Sfc_Type = {}
+    kwargs_for_TIModel_Sfc_Type_calib = kwargs_for_TIModel_Sfc_Type.copy()
+    if run_type == 'constant' and mb_model_sub_class == TIModel_Sfc_Type:
+        # for calibration, no interpolation will be done ...
+        kwargs_for_TIModel_Sfc_Type_calib['interpolation_optim'] = False
+
+    workflow.execute_entity_task(melt_f_calib_geod_prep_inversion, [gdir],
+                                 pf=pf,  # precipitation factor
+                                 mb_type=mb_type, grad_type=grad_type,
+                                 climate_type=climate_type, residual=0,
+                                 path_geodetic=path_geodetic, ye=ye_calib,
+                                 mb_model_sub_class=mb_model_sub_class,
+                                 kwargs_for_TIModel_Sfc_Type=kwargs_for_TIModel_Sfc_Type_calib,
+                                 spinup=spinup)
+
+    # here glen-a is calibrated to mathch gdirs glaciers in total
+    border = 80
+    filter = border >= 20
+    pd_inv_melt_f = workflow.calibrate_inversion_from_consensus([gdir],
+                                                                     apply_fs_on_mismatch=False,
+                                                                     error_on_mismatch=False,
+                                                                     filter_inversion_output=filter)
+    workflow.execute_entity_task(tasks.init_present_time_glacier, [gdir])
+
+    a_factor = gdir.get_diagnostics()['inversion_glen_a'] / cfg.PARAMS['inversion_glen_a']
+    # just a check if a-factor is set to the same value
+    np.testing.assert_allclose(a_factor,
+                               gdir.get_diagnostics()['inversion_glen_a'] / cfg.PARAMS['inversion_glen_a'])
+
+    # double check: volume sum of gdirs from Farinotti estimate is equal to oggm estimates
+    np.testing.assert_allclose(pd_inv_melt_f.sum()['vol_itmix_m3'],
+                               pd_inv_melt_f.sum()['vol_oggm_m3'], rtol=1e-2)
+
+    ######
+    if mb_model_sub_class == TIModel_Sfc_Type:
+        add_msm = 'sfc_type_{}_tau_{}_{}_update_ratio{}_mb_fb_{}'.format(kwargs_for_TIModel_Sfc_Type['melt_f_change'],
+                                                                         kwargs_for_TIModel_Sfc_Type['tau_e_fold_yr'],
+                                                                         kwargs_for_TIModel_Sfc_Type['melt_f_update'],
+                                                                         kwargs_for_TIModel_Sfc_Type[
+                                                                             'melt_f_ratio_snow_to_ice'],
+                                                                         mb_elev_feedback)
+    else:
+        add_msm = 'TIModel_no_sfc_type_distinction_mb_fb_{}'
+    j = 'test'
+    add = 'pf{}'.format(pf)
+    fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
+    gdir.read_json(filename='melt_f_geod', filesuffix=fs)
+    rid = '{}_{}_{}'.format('ISIMIP3b', ensemble, ssp)
+    if run_type == 'constant':
+        run_model = run_constant_climate_TIModel(gdir, bias=0, nyears=nyears,
+                                                 y0=y0, halfsize=hs,
+                                                 mb_type=mb_type,
+                                                 climate_filename='gcm_data',
+                                                 grad_type=grad_type, precipitation_factor=pf,
+                                                 melt_f=gdir.read_json(filename='melt_f_geod', filesuffix=fs)[
+                                                     f'melt_f_pf_{pf}'],
+                                                 climate_input_filesuffix=rid,  # dataset,
+                                                 output_filesuffix='_{}{}_ISIMIP3b_{}_{}_{}_{}{}_hist_{}_{}'.format(
+                                                     nosigmaadd, add_msm,
+                                                     dataset, ensemble, mb_type, grad_type,
+                                                     add, ssp, j),
+                                                 mb_model_sub_class=mb_model_sub_class,
+                                                 kwargs_for_TIModel_Sfc_Type=kwargs_for_TIModel_Sfc_Type,
+                                                 # {'melt_f_change':'linear'},
+                                                 mb_elev_feedback=mb_elev_feedback,
+                                                 interpolation_optim=interpolation_optim,
+                                                 store_monthly_step=store_monthly_step)
+    elif run_type == 'random':
+        run_model = run_random_climate_TIModel(gdir, nyears=nyears, y0=y0, halfsize=hs,
+                                               mb_model_sub_class=mb_model_sub_class,
+                                               temperature_bias=None,
+                                               mb_type=mb_type, grad_type=grad_type,
+                                               bias=0, seed=seed,
+                                               melt_f=gdir.read_json(filename='melt_f_geod', filesuffix=fs)[
+                                                   f'melt_f_pf_{pf}'],
+                                               precipitation_factor=pf,
+                                               climate_filename='gcm_data',
+                                               climate_input_filesuffix=rid,
+                                               output_filesuffix='_{}{}_ISIMIP3b_{}_{}_{}_{}{}_hist_{}_{}'.format(
+                                                   nosigmaadd, add_msm,
+                                                   dataset, ensemble, mb_type, grad_type, add, ssp, j),
+                                               kwargs_for_TIModel_Sfc_Type=kwargs_for_TIModel_Sfc_Type,
+                                               # {'melt_f_change':'linear'},
+                                               mb_elev_feedback=mb_elev_feedback, store_monthly_step=store_monthly_step,
+                                               unique_samples=unique_samples)
+
+    elif run_type == 'from_climate':
+        run_model = run_from_climate_data_TIModel(gdir, bias=0, min_ys=y0,
+                                                  ye=2100, mb_type=mb_type,
+                                                  climate_filename='gcm_data',
+                                                  grad_type=grad_type, precipitation_factor=pf,
+                                                  melt_f=gdir.read_json(filename='melt_f_geod', filesuffix=fs)[
+                                                      f'melt_f_pf_{pf}'],
+                                                  climate_input_filesuffix=rid,  # dataset,
+                                                  output_filesuffix='_{}{}_ISIMIP3b_{}_{}_{}_{}{}_hist_{}_{}'.format(
+                                                      nosigmaadd, add_msm,
+                                                      dataset, ensemble, mb_type, grad_type, add, ssp, j),
+                                                  mb_model_sub_class=mb_model_sub_class,
+                                                  kwargs_for_TIModel_Sfc_Type=kwargs_for_TIModel_Sfc_Type,
+                                                  # {'melt_f_change':'linear'},
+                                                  mb_elev_feedback=mb_elev_feedback,
+                                                  store_monthly_step=store_monthly_step)
+    ds = utils.compile_run_output([gdir],
+                                  input_filesuffix='_{}{}_ISIMIP3b_{}_{}_{}_{}{}_hist_{}_{}'.format(nosigmaadd, add_msm,
+                                                                                                    dataset, ensemble,
+                                                                                                    mb_type, grad_type,
+                                                                                                    add, ssp, j))
+
+    # init_model_filesuffix='{}{}_ISIMIP3b_{}_{}_{}_{}{}_historical_{}'.format(nosigmaadd,add_msm,
+
+    return ds, gdir.read_json(filename='melt_f_geod', filesuffix=fs)[f'melt_f_pf_{pf}'], run_model
 

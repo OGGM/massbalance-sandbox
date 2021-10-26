@@ -4,15 +4,17 @@ import xarray as xr
 import logging
 import warnings
 import oggm
+import copy
 from oggm import entity_task
 
 from oggm.core.flowline import FileModel
 from oggm.exceptions import InvalidWorkflowError
 
 # import the MBsandbox modules
-from MBsandbox.mbmod_daily_oneflowline import TIModel, RandomMassBalance_TIModel
-from MBsandbox.mbmod_daily_oneflowline import \
-    MultipleFlowlineMassBalance_TIModel
+from MBsandbox.mbmod_daily_oneflowline import TIModel, TIModel_Sfc_Type, RandomMassBalance_TIModel
+from MBsandbox.mbmod_daily_oneflowline import (MultipleFlowlineMassBalance_TIModel,
+                                               ConstantMassBalance_TIModel,
+                                               AvgClimateMassBalance_TIModel)
 from oggm.core.flowline import flowline_model_run
 from oggm.core.massbalance import ConstantMassBalance
 
@@ -24,10 +26,7 @@ log = logging.getLogger(__name__)
 ### maybe these won't be necessary if the OGGM core flowline run_from_climate_data
 # and run_from_constant_data are enough flexible to use another MultipleFlowlineMassBalance
 # model ...
-
 # # do it similar as in run_from_climate_data()
-
-
 
 
 @entity_task(log)
@@ -46,7 +45,9 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
                                   precipitation_factor=None,
                                   temperature_bias=None,
                                   mb_type='mb_monthly', grad_type='cte',
-                                  mb_model_class=TIModel,
+                                  mb_model_sub_class=TIModel,
+                                  kwargs_for_TIModel_Sfc_Type={},
+                                  reset=True,
                                   **kwargs):
     """ Runs a glacier with climate input from e.g. W5E5 or a GCM.
 
@@ -55,7 +56,6 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
     and run a :py:func:`oggm.core.flowline.flowline_model_run`.
 
     same as in run_from_climate_data but compatible with TIModel
-
 
     Parameters:
     ----------------------------
@@ -161,7 +161,7 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
     else:
         melt_f_chosen = melt_f
 
-    mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=mb_model_class,
+    mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=mb_model_sub_class,
                                              prcp_fac=precipitation_factor,
                                              melt_f=melt_f_chosen,
                                              filename=climate_filename,
@@ -170,7 +170,7 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
                                              mb_type=mb_type,
                                              grad_type=grad_type,
                                              # check_calib_params=check_calib_params,
-                                             )
+                                             **kwargs_for_TIModel_Sfc_Type)
 
     # if temperature_bias is not None:
     #    mb.temp_bias = temperature_bias
@@ -186,6 +186,15 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
     if ye is None:
         # Decide from climate (we can run the last year with data as well)
         ye = mb.flowline_mb_models[0].ye + 1
+
+    #if isinstance(mb_model_sub_class, TIModel_Sfc_Type):
+    if init_model_fls is None:
+        fls = gdir.read_pickle('model_flowlines')
+    else:
+        fls = copy.deepcopy(init_model_fls)
+
+    if reset and mb_model_sub_class == TIModel_Sfc_Type:
+            mb.flowline_mb_models[-1].reset_pd_mb_bucket(init_model_fls = fls)
 
     return flowline_model_run(gdir, output_filesuffix=output_filesuffix,
                               mb_model=mb, ys=ys, ye=ye,
@@ -210,7 +219,10 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                        output_filesuffix='', init_model_fls=None,
                        zero_initial_glacier=False,
                        unique_samples=False, #melt_f_file=None,
+                               reset = True,
+                               kwargs_for_TIModel_Sfc_Type={},
                                **kwargs):
+
     """Runs the random mass-balance model for a given number of years.
 
     copy of run_random_climate --> needs to be tested ...
@@ -309,7 +321,8 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                                              mb_model_sub_class = mb_model_sub_class,
                                      filename=climate_filename,
                                      input_filesuffix=climate_input_filesuffix,
-                                     unique_samples=unique_samples)
+                                     unique_samples=unique_samples,
+                                     **kwargs_for_TIModel_Sfc_Type)
 
     if precipitation_factor is not None:
         mb.prcp_fac = precipitation_factor
@@ -319,6 +332,21 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         # do the quality check!
         mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
 
+    if init_model_fls is None:
+        fls = gdir.read_pickle('model_flowlines')
+    else:
+        fls = copy.deepcopy(init_model_fls)
+    if reset and mb_model_sub_class == TIModel_Sfc_Type:
+        mb.flowline_mb_models[-1].mbmod.reset_pd_mb_bucket(init_model_fls = fls)
+
+    # do once the spinup manually but then not again
+    if mb_model_sub_class == TIModel_Sfc_Type:
+        spinup_yrs = kwargs_for_TIModel_Sfc_Type['spinup_yrs']
+        mb.flowline_mb_models[-1].mbmod.get_specific_mb(year=np.arange(y0-halfsize-spinup_yrs,
+                                                                  y0-halfsize),
+                                                        fls=fls)
+        # spinup is done, now set the spinup_yrs to zero for the actual run!!!
+        mb.flowline_mb_models[-1].mbmod.spinup_yrs = 0
 
     return flowline_model_run(gdir, output_filesuffix=output_filesuffix,
                               mb_model=mb, ys=0, ye=nyears,
@@ -336,6 +364,8 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
 def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                          bias=None, temperature_bias=None,
                          precipitation_factor=None,
+                         mb_type='mb_monthly', grad_type='cte',
+                         melt_f=None,
                          store_monthly_step=False,
                          store_model_geometry=None,
                          init_model_filesuffix=None,
@@ -343,12 +373,21 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                          output_filesuffix='',
                          climate_filename='climate_historical',
                          climate_input_filesuffix='',
+                         mb_model_sub_class=TIModel,
                          init_model_fls=None,
-                         zero_initial_glacier=False, **kwargs):
-    """Runs the constant mass-balance model for a given number of years.
+                         zero_initial_glacier=False,
+                                 kwargs_for_TIModel_Sfc_Type = {},
+                                 reset = True,
+                                 interpolation_optim=False,
+                                 use_avg_climate=False,
+                                 **kwargs):
+    """Runs the constant mass-balance model of the TIModel
+     for a given number of years.
+
+     This is equivalen to run_constant_climate but is compatible with TIModel
 
     This will initialize a
-    :py:class:`oggm.core.massbalance.MultipleFlowlineMassBalance`,
+    :py:class:`oggm.core.massbalance.MultipleFlowlineMassBalance_TIModel`,
     and run a :py:func:`oggm.core.flowline.flowline_model_run`.
 
     Parameters
@@ -394,16 +433,24 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
     output_filesuffix : str
         this add a suffix to the output file (useful to avoid overwriting
         previous experiments)
+    mb_model_sub_class : class
+        which child class of TIModel_Parent should be used, either TIModel (default)
+        or TIModel_Sfc_Type
     zero_initial_glacier : bool
         if true, the ice thickness is set to zero before the simulation
     init_model_fls : []
         list of flowlines to use to initialise the model (the default is the
         present_time_glacier file from the glacier directory)
+    kwargs_for_TIModel_Sfc_Type : dict
+        default is empty dictionary, kwargs to pass to the TIModel_Sfc_Type instance,
+        to change these params: melt_f_ratio_snow_to_ice, melt_f_update, spinup_yrs,
+        tau_e_fold_yr, melt_f_change; if mb_model_sub_class is TIModel, this should be
+        an empty dict!
     kwargs : dict
         kwargs to pass to the FluxBasedModel instance
     """
 
-    NotImplementedError('work in process...')
+    # NotImplementedError('work in process...')
 
     if init_model_filesuffix is not None:
         fp = gdir.get_filepath('model_geometry',
@@ -414,15 +461,59 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         fmod.run_until(init_model_yr)
         init_model_fls = fmod.fls
 
-    mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=ConstantMassBalance,
-                                     y0=y0, halfsize=halfsize,
-                                     bias=bias, filename=climate_filename,
-                                     input_filesuffix=climate_input_filesuffix)
 
-    if temperature_bias is not None:
-        mb.temp_bias = temperature_bias
+    if melt_f == 'from_json':
+        fs = '_{}_{}_{}'.format(climate_input_filesuffix, mb_type, grad_type)
+        d = gdir.read_json(filename='melt_f_geod', filesuffix=fs)
+        # get the calibrated melt_f that suits to the prcp factor
+        try:
+            melt_f_chosen = d['melt_f_pf_{}'.format(np.round(precipitation_factor, 2))]
+        except:
+            raise InvalidWorkflowError('there is no calibrated melt_f for this precipitation factor, glacier, climate'
+                                       'mb_type and grad_type, need to run first melt_f_calib_geod_prep_inversion'
+                                       'with these options!')
+        #pd_inv_melt_f = pd.read_csv(melt_f_file, index_col='RGIId')
+        #melt_f_chosen = pd_inv_melt_f['melt_f_opt'].loc[gdir.rgi_id]
+        # use same pf as from initialisation and calibration
+        #np.testing.assert_allclose(precipitation_factor, pd_inv_melt_f['pf'])
+    else:
+        melt_f_chosen = melt_f
+
+    if mb_model_sub_class == TIModel and kwargs_for_TIModel_Sfc_Type != {}:
+        raise InvalidWorkflowError('if mb_model_sub_class is TIModel,'
+                                   ' this should be an empty dict!')
+    if use_avg_climate:
+        mb_sub_model_class = AvgClimateMassBalance_TIModel
+    else:
+        mb_sub_model_class = ConstantMassBalance_TIModel
+    mb = MultipleFlowlineMassBalance_TIModel(gdir,
+                                             mb_model_class=mb_sub_model_class,
+                                             y0=y0, halfsize=halfsize,
+                                             bias=bias,
+                                             melt_f=melt_f_chosen,
+                                             prcp_fac=precipitation_factor,
+                                             mb_type=mb_type,
+                                             grad_type=grad_type,
+                                             filename=climate_filename,
+                                             input_filesuffix=climate_input_filesuffix,
+                                             mb_model_sub_class=mb_model_sub_class,
+                                             interpolation_optim=interpolation_optim,
+                                             **kwargs_for_TIModel_Sfc_Type)
+
+
     if precipitation_factor is not None:
         mb.prcp_fac = precipitation_factor
+    if temperature_bias is not None:
+        mb.temp_bias = temperature_bias
+    else:
+        # do the quality check!
+        mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
+    if init_model_fls is None:
+        fls = gdir.read_pickle('model_flowlines')
+    else:
+        fls = copy.deepcopy(init_model_fls)
+    if reset and mb_model_sub_class == TIModel_Sfc_Type:
+        mb.flowline_mb_models[-1].reset_pd_mb_bucket(init_model_fls = fls)
 
     return flowline_model_run(gdir, output_filesuffix=output_filesuffix,
                               mb_model=mb, ys=0, ye=nyears,
