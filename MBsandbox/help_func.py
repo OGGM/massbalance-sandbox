@@ -543,17 +543,24 @@ def calib_inv_run(gdir=np.NaN, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'li
                                                'melt_f_ratio_snow_to_ice': 0.5},
                   mb_elev_feedback='annual',
                   nyears=300, seed=0,
-                  spinup=True, interpolation_optim=False, run_type='constant',
-                  mb_model_sub_class=TIModel_Sfc_Type, pf=2, mb_type='mb_monthly',
+                  spinup=True, interpolation_optim=False,
+                  run_type='constant',
+                  mb_model_sub_class=TIModel_Sfc_Type, pf=2,
+                  mb_type='mb_monthly',
                   grad_type='cte', y0=2004, hs=10,
-                  store_monthly_step=False, unique_samples=False, climate_type='W5E5',
-                  ensemble = 'mri-esm2-0_r1i1p1f1', ssp = 'ssp126' ):
+                  store_monthly_step=False, unique_samples=False,
+                  climate_type='W5E5',
+                  ensemble = 'mri-esm2-0_r1i1p1f1', ssp = 'ssp126'):
+    # does melt_f_calib_geod_prep_inversion,
+    # then calibrate_inversion_from_consensus
+    # then init_present_time_glacier
+    # then it runs either constant, random or from climate for a given period
+    # todo: add better documentation
+
     # ye_h = 2014
     # y0 = 1979
     dataset = climate_type
     #gdirs = [gdir]
-    url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
-    path_geodetic = utils.file_downloader(url)
 
     ye = 2100
     ye_calib = 2020
@@ -569,7 +576,7 @@ def calib_inv_run(gdir=np.NaN, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'li
                                  pf=pf,  # precipitation factor
                                  mb_type=mb_type, grad_type=grad_type,
                                  climate_type=climate_type, residual=0,
-                                 path_geodetic=path_geodetic, ye=ye_calib,
+                                 ye=ye_calib,
                                  mb_model_sub_class=mb_model_sub_class,
                                  kwargs_for_TIModel_Sfc_Type=kwargs_for_TIModel_Sfc_Type_calib,
                                  spinup=spinup)
