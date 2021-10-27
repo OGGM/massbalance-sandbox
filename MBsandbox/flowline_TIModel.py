@@ -751,9 +751,10 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
 
             #check if year is leap year
             days_in_year = len(np.sum(prcpsol, axis=0))
-            SEC_IN_YEAR = cfg.SEC_IN_DAY * days_in_year
 
-            mb_bias = mb_mod.bias * seconds / SEC_IN_YEAR #cfg.SEC_IN_YEAR
+            if mb_mod.bias != 0:
+                raise InvalidWorkflowError('run_with_hydro_daily cant handle '
+                                           'mb_model.bias != 0.' )
 
             # on daily basis prcp has shape (bins, days in year) bin_area must have shape (bins,1)
             bin_area = bin_area[:, np.newaxis]
@@ -764,18 +765,25 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
             prcpsol_on_g = prcpsol * bin_area
             prcpsol_off_g = prcpsol * off_area
 
-            # IMPORTANT: this does not guarantee that melt cannot be negative
-            # the reason is the MB residual that here can only be understood
-            # as a fake melt process.
-            # In particular at the monthly scale this can lead to negative
-            # or winter positive melt - we try to mitigate this
-            # issue at the end of the year
+            # IMPORTANT: This should NORMALLY never be negative unless
+            # Some weird geometry or numerical issues
             melt_on_g = (prcpsol - mb) * bin_area
             melt_off_g = (prcpsol - mb) * off_area
 
-            # This is the bad boy
-            bias_on_g = mb_bias * bin_area
-            bias_off_g = mb_bias * off_area
+            # These thresholds are arbitrary for now. Numbers are usually much
+            # larger
+            if np.any(melt_on_g < -1):
+                log.warning('WARNING: Melt on glacier is negative although it '
+                            'should not be. If you have time check '
+                            'whats going on. Melt: {}'.format(melt_on_g.min()))
+            if np.any(melt_off_g < -1):
+                log.warning('WARNING: Melt off glacier is negative although it '
+                            'should not be. If you have time check '
+                            'whats going on. Melt: {}'.format(melt_off_g.min()))
+
+            # We clip anyway
+            melt_on_g = utils.clip_min(melt_on_g, 0)
+            melt_off_g = utils.clip_min(melt_off_g, 0)
 
             # Update bucket with accumulation and melt
             # snow bucket has size (heights, 366) but prcpsol_off_g only has (heights, 365 if no leap year)
@@ -801,8 +809,6 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
             # if not a leap year, the last day will remain 0
             out['melt_off_glacier']['data'][i, :] = np.sum(melt_off_g, axis=0)
             out['melt_on_glacier']['data'][i, :days_in_year] = np.sum(melt_on_g, axis=0)
-            out['melt_residual_off_glacier']['data'][i, :days_in_year] = np.sum(bias_off_g, axis=0)
-            out['melt_residual_on_glacier']['data'][i, :days_in_year] = np.sum(bias_on_g, axis=0)
             out['liq_prcp_off_glacier']['data'][i, :days_in_year] = np.sum(liq_prcp_off_g, axis=0)
             out['liq_prcp_on_glacier']['data'][i, :days_in_year] = np.sum(liq_prcp_on_g, axis=0)
             out['snowfall_off_glacier']['data'][i, :] = np.sum(prcpsol_off_g, axis=0)
@@ -816,26 +822,6 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
         # Update the annual data
         out['off_area']['data'][i] = np.sum(off_area)
         out['on_area']['data'][i] = np.sum(bin_area)
-
-        # put the residual where we can
-        for melt, bias in zip(
-                [
-                    out['melt_on_glacier']['data'][i, :],
-                    out['melt_off_glacier']['data'][i, :],
-                ],
-                [
-                    out['melt_residual_on_glacier']['data'][i, :],
-                    out['melt_residual_off_glacier']['data'][i, :],
-                ],
-        ):
-
-            real_melt = melt - bias
-            to_correct = utils.clip_min(real_melt, 0)
-            to_correct_sum = np.sum(to_correct)
-            if (to_correct_sum > 1e-7) and (np.sum(melt) > 0):
-                # Ok we correct the positive melt instead
-                fac = np.sum(melt) / to_correct_sum
-                melt[:] = to_correct * fac
 
         # Correct for mass-conservation and match the ice-dynamics model
         fmod.run_until(yr + 1)
@@ -866,8 +852,9 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
         out['model_mb']['data'][i] = model_mb
         out['residual_mb']['data'][i] = residual_mb
 
-        vars = ['melt_off_glacier', 'melt_on_glacier', 'melt_residual_off_glacier', 'melt_residual_on_glacier',
-                'liq_prcp_off_glacier', 'liq_prcp_on_glacier', 'snowfall_off_glacier', 'snowfall_on_glacier']
+        vars = ['melt_off_glacier', 'melt_on_glacier',
+                'liq_prcp_off_glacier', 'liq_prcp_on_glacier',
+                'snowfall_off_glacier', 'snowfall_on_glacier']
         if days_in_year == 365:
             for var in vars:
                 out[var]['data'][i, -1] = np.NaN
@@ -931,4 +918,3 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
     fpath = gdir.get_filepath('model_diagnostics', filesuffix=suffix)
     ods.to_netcdf(fpath, mode='a')
     return ods
-
