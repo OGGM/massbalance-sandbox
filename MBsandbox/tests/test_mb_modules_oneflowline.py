@@ -885,6 +885,118 @@ class Test_geodetic_hydro1:
             # prcp_fac can be quite different ...
             #assert_allclose(prcp_facs[0], prcp_facs[1])
 
+    def test_daily_monthly_annual_specific_mb(self, gdir):
+        # for both ERA5 and WFDE5
+
+        cfg.PARAMS['hydro_month_nh'] = 1  # 0
+        h, w = gdir.get_inversion_flowline_hw()
+
+        grad_type = 'cte'
+        for dataset in ['ERA5', 'WFDE5_CRU']:
+            if dataset == 'ERA5':
+                pf = 2.5
+            elif dataset == 'WFDE5_CRU':
+                pf = 1
+            for mb_type in ['mb_monthly', 'mb_real_daily']:
+                if mb_type == 'mb_real_daily' and dataset == 'ERA5':
+                    climate = 'ERA5_daily'
+                    cfg.PARAMS['baseline_climate'] = climate
+                    fs = '_daily_ERA5_daily'
+                    process_era5_daily_data(gdir,
+                                            output_filesuffix=fs)
+                elif mb_type == 'mb_real_daily' and dataset == 'WFDE5_CRU':
+                    climate = dataset
+                    fs = '_daily_WFDE5_CRU'
+                    process_w5e5_data(gdir, climate_type=climate,
+                                      temporal_resol='daily')
+                elif mb_type == 'mb_monthly' and dataset == 'ERA5':
+                    climate = 'ERA5dr'
+                    cfg.PARAMS['baseline_climate'] = climate
+                    fs = '_monthly_ERA5dr'
+                    oggm.shop.ecmwf.process_ecmwf_data(gdir,
+                                                       dataset=climate,
+                                                       output_filesuffix=fs)
+                elif mb_type == 'mb_monthly' and dataset == 'WFDE5_CRU':
+                    climate = dataset
+                    fs = '_monthly_WFDE5_CRU'
+                    process_w5e5_data(gdir, climate_type=dataset,
+                                      temporal_resol='monthly')
+                gd_mb = TIModel(gdir, 200, mb_type=mb_type, grad_type=grad_type,
+                                prcp_fac=pf, input_filesuffix=fs,
+                                baseline_climate=climate)
+
+                spec_mb_annually = gd_mb.get_specific_mb(heights=h, widths=w,
+                                                         year=np.arange(1980,
+                                                                        2019))
+
+                # check if annual and monthly mass balance are the same
+                ann_mb = gd_mb.get_annual_mb(heights=h, year=2015)
+                mon_mb_sum = 0
+                for m in np.arange(1, 13):
+                    mon_mb_sum += gd_mb.get_monthly_mb(heights=h,
+                                                       year=date_to_floatyear(
+                                                           2015, m))
+                np.testing.assert_allclose(mon_mb_sum / 12, ann_mb, rtol=1e-4)
+
+                if mb_type == 'mb_real_daily':
+
+                    # test if the climate output of monthly
+                    # and daily/annual is the same
+                    # by just looking at the first month
+                    clim_ann = gd_mb._get_2d_annual_climate(h, 2015)
+                    clim_mon = gd_mb._get_2d_monthly_climate(h, 2015.0)
+                    T_mon_from_ann = clim_ann[0][:, :np.shape(clim_mon[0])[1]]
+                    np.testing.assert_allclose(T_mon_from_ann, clim_mon[0],
+                                               rtol=1e-6)
+                    Tfmelt_mon_from_ann = clim_ann[1][:,
+                                          :np.shape(clim_mon[1])[1]]
+                    np.testing.assert_allclose(Tfmelt_mon_from_ann,
+                                               clim_mon[1], rtol=1e-6)
+                    prcp_mon_from_ann = clim_ann[2][:,
+                                        :np.shape(clim_mon[2])[1]]
+                    np.testing.assert_allclose(prcp_mon_from_ann,
+                                               clim_mon[2], rtol=1e-6)
+                    prcp_mon_from_ann = clim_ann[2][:,
+                                        :np.shape(clim_mon[2])[1]]
+                    np.testing.assert_allclose(prcp_mon_from_ann,
+                                               clim_mon[2], rtol=1e-6)
+                    solidprcp_mon_from_ann = clim_ann[3][:,
+                                             :np.shape(clim_mon[3])[1]]
+                    np.testing.assert_allclose(solidprcp_mon_from_ann,
+                                               clim_mon[3], rtol=1e-6)
+
+                    # check if daily and annual mass balance are the same
+                    # problem:
+                    # as get_daily_mb accounts as well for leap years,
+                    # doy are not 365.25 as in get_annual_mb but the amount
+                    # of days of the year in reality!!!
+                    # (needed for hydro model of Sarah Hanus)
+                    # therefore we increased here rtol !!!
+                    # but why are the differences in spec_mb so large this so large?
+                    # @Fabi: can we do something about that?
+                    day_mb = gd_mb.get_daily_mb(heights=h, year=2015)
+                    day_mb_yearly_sum = []
+                    for mb in day_mb:
+                        day_mb_yearly_sum.append(mb.mean())
+                    # problem: day_mb_yearly_sum is a bit smaller than ann_mb
+                    np.testing.assert_allclose(day_mb_yearly_sum, ann_mb,
+                                               rtol=1e-4)  # would need 2e-2)
+
+                    # check if daily and yearly specific mb are the same?
+                    spec_mb_daily = gd_mb.get_specific_daily_mb(heights=h,
+                                                                widths=w,
+                                                                year=np.arange(
+                                                                    1980, 2019))
+                    spec_mb_daily_yearly_sum = []
+                    for mb in spec_mb_daily:
+                        spec_mb_daily_yearly_sum.append(mb.sum())
+                    np.testing.assert_allclose(spec_mb_daily_yearly_sum,
+                                               spec_mb_annually,
+                                               rtol=1e-4)  # would need 5e-2
+
+#
+
+
     def test_melt_f_calib_geod_prep_inversion(self):
 
         # choose glaciers where we can not find a melt_f easily
@@ -966,116 +1078,6 @@ class Test_geodetic_hydro1:
                 # before the correction
                 assert corrected_ref_hgt > uncorrected_ref_hgt
 
-    def test_daily_monthly_annual_specific_mb(self, gdir):
-        # for both ERA5 and WFDE5
-
-        cfg.PARAMS['hydro_month_nh'] = 1 # 0
-        h, w = gdir.get_inversion_flowline_hw()
-
-        grad_type = 'cte'
-        for dataset in ['ERA5', 'WFDE5_CRU']:
-            if dataset == 'ERA5':
-                pf = 2.5
-            elif dataset == 'WFDE5_CRU':
-                pf = 1
-            for mb_type in ['mb_monthly', 'mb_real_daily']:
-                if mb_type == 'mb_real_daily' and dataset == 'ERA5':
-                    climate = 'ERA5_daily'
-                    cfg.PARAMS['baseline_climate'] = climate
-                    fs = '_daily_ERA5_daily'
-                    process_era5_daily_data(gdir,
-                                            output_filesuffix=fs)
-                elif mb_type == 'mb_real_daily' and dataset == 'WFDE5_CRU':
-                    climate = dataset
-                    fs='_daily_WFDE5_CRU'
-                    process_w5e5_data(gdir, climate_type=climate,
-                                      temporal_resol='daily')
-                elif mb_type == 'mb_monthly' and dataset == 'ERA5':
-                    climate = 'ERA5dr'
-                    cfg.PARAMS['baseline_climate'] = climate
-                    fs = '_monthly_ERA5dr'
-                    oggm.shop.ecmwf.process_ecmwf_data(gdir,
-                                                       dataset=climate,
-                                                       output_filesuffix=fs)
-                elif mb_type == 'mb_monthly' and dataset == 'WFDE5_CRU':
-                    climate = dataset
-                    fs = '_monthly_WFDE5_CRU'
-                    process_w5e5_data(gdir, climate_type=dataset,
-                                      temporal_resol='monthly')
-                gd_mb = TIModel(gdir, 200, mb_type=mb_type, grad_type=grad_type,
-                                prcp_fac=pf, input_filesuffix=fs,
-                                baseline_climate=climate)
-
-                spec_mb_annually = gd_mb.get_specific_mb(heights=h, widths=w,
-                                                         year=np.arange(1980,
-                                                                        2019))
-
-                # check if annual and monthly mass balance are the same
-                ann_mb = gd_mb.get_annual_mb(heights=h, year=2015)
-                mon_mb_sum = 0
-                for m in np.arange(1, 13):
-                    mon_mb_sum += gd_mb.get_monthly_mb(heights=h,
-                                                       year=date_to_floatyear(
-                                                           2015, m))
-                np.testing.assert_allclose(mon_mb_sum / 12, ann_mb, rtol=1e-4)
-
-                if mb_type == 'mb_real_daily':
-
-                    # test if the climate output of monthly
-                    # and daily/annual is the same
-                    # by just looking at the first month
-                    clim_ann = gd_mb._get_2d_annual_climate(h, 2015)
-                    clim_mon = gd_mb._get_2d_monthly_climate(h, 2015.0)
-                    T_mon_from_ann = clim_ann[0][:, :np.shape(clim_mon[0])[1]]
-                    np.testing.assert_allclose(T_mon_from_ann, clim_mon[0],
-                                               rtol=1e-6)
-                    Tfmelt_mon_from_ann = clim_ann[1][:,
-                                          :np.shape(clim_mon[1])[1]]
-                    np.testing.assert_allclose(Tfmelt_mon_from_ann,
-                                               clim_mon[1], rtol=1e-6)
-                    prcp_mon_from_ann = clim_ann[2][:,
-                                        :np.shape(clim_mon[2])[1]]
-                    np.testing.assert_allclose(prcp_mon_from_ann,
-                                               clim_mon[2], rtol=1e-6)
-                    prcp_mon_from_ann = clim_ann[2][:,
-                                        :np.shape(clim_mon[2])[1]]
-                    np.testing.assert_allclose(prcp_mon_from_ann,
-                                               clim_mon[2], rtol=1e-6)
-                    solidprcp_mon_from_ann = clim_ann[3][:,
-                                             :np.shape(clim_mon[3])[1]]
-                    np.testing.assert_allclose(solidprcp_mon_from_ann,
-                                               clim_mon[3], rtol=1e-6)
-
-                    # check if daily and annual mass balance are the same
-                    # problem:
-                    # as get_daily_mb accounts as well for leap years,
-                    # doy are not 365.25 as in get_annual_mb but the amount
-                    # of days of the year in reality!!!
-                    # (needed for hydro model of Sarah Hanus)
-                    # therefore we increased here rtol !!!
-                    # but why are the differences in spec_mb so large this so large?
-                    # @Fabi: can we do something about that?
-                    day_mb = gd_mb.get_daily_mb(heights=h, year=2015)
-                    day_mb_yearly_sum = []
-                    for mb in day_mb:
-                        day_mb_yearly_sum.append(mb.mean())
-                    # problem: day_mb_yearly_sum is a bit smaller than ann_mb
-                    np.testing.assert_allclose(day_mb_yearly_sum, ann_mb,
-                                               rtol=1e-4) # would need 2e-2)
-
-                    # check if daily and yearly specific mb are the same?
-                    spec_mb_daily = gd_mb.get_specific_daily_mb(heights=h,
-                                                                widths=w,
-                                                                year=np.arange(
-                                                                    1980, 2019))
-                    spec_mb_daily_yearly_sum = []
-                    for mb in spec_mb_daily:
-                        spec_mb_daily_yearly_sum.append(mb.sum())
-                    np.testing.assert_allclose(spec_mb_daily_yearly_sum,
-                                               spec_mb_annually,
-                                               rtol=1e-4) # would need 5e-2
-
-# %%
 # start it again to have the default hydro_month
 class Test_directobs_hydro10:
     def test_minimize_bias(self, gdir):

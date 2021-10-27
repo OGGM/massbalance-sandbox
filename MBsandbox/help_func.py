@@ -28,7 +28,7 @@ from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel, run_const
 
 from oggm import cfg
 
-# necessary for
+# necessary for `melt_f_calib_geod_prep_inversion`
 _doc = 'the calibrated melt_f according to the geodetic data with the ' \
        'chosen precipitation factor'
 cfg.BASENAMES['melt_f_geod'] = ('melt_f_geod.json', _doc)
@@ -38,6 +38,10 @@ def minimize_bias(x, gd_mb=None, gdir_min=None,
     """ calibrates the melt factor (melt_f) by getting the bias to zero
     comparing modelled mean specific mass balance to
     direct glaciological observations
+
+    attention: this is a bit deprecated. It uses the direct glaciological
+    observations for calibration. If you want to use the geodetic,
+    you should use instead `minimize_bias_geodetic`!
 
     Parameters
     ----------
@@ -99,7 +103,7 @@ def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
                            spinup=True):
     """ calibrates the melt factor (melt_f) by getting the bias to zero
     comparing modelled mean specific mass balance between 2000 and 2020 to
-    observed geodetic data
+    observed geodetic data (from Hugonnet et al. 2021)
 
     Parameters
     ----------
@@ -169,9 +173,43 @@ def optimize_std_quot_brentq_geod(x, gd_mb=None, mb_geodetic=None,
                                   h=None, w=None,
                                   ys_glac=np.arange(1979, 2019, 1),
                                   ):
+    """ calibrates the optimal precipitation factor (pf) by correcting the
+    standard deviation of the modelled mass balance by using the standard deviation
+    from the direct glaciological measurements as reference
+
+    for each pf an optimal melt_f is found (by using the geodetic data via `minimize_bias_geodetic`),
+    then (1 - standard deviation quotient between modelled and reference mass balance) is computed,
+    which is then minimised
+
+    Parameters
+    ----------
+    x : float
+        what is optimised (here the precipitation factor)
+    gd_mb : class instance
+        instantiated class of TIModel, this is updated by pf and melt_f
+    mb_geodetic: float
+        geodetic mass balance between 2000-2020 of the instantiated glacier
+    mb_glaciological : pandas.core.series.Series
+        direct glaciological timeseries
+        e.g. gdir.get_ref_mb_data(input_filesuffix='_{}_{}'.format(temporal_resol, climate_type))['ANNUAL_BALANCE']
+    h: np.array
+        heights of the instantiated glacier
+    w: np.array
+        widths of the instantiated glacier
+    ys_glac : np.array
+        array of years where both, glaciological observations and climate data are available
+        (just use the years from the ref_mb_data file)
+
+    Returns
+    -------
+    float
+        1- quot_std
+
+    """
+
     pf = x
     # compute optimal melt_f according to geodetic data
-    melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 1, 10000,
+    melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
                                        xtol=0.01,
                                        args=(gd_mb, mb_geodetic, h, w, pf),
                                        disp=True)
@@ -400,7 +438,6 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
                                 baseline_climate=climate_type, residual=residual,
                                 **kwargs_for_TIModel_Sfc_Type)
 
-
     # old:
     # if necessary add a temperature bias (reference height change)
     # mb_mod.historical_climate_qc_mod(gdir),
@@ -419,9 +456,9 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
         nc.uncorrected_ref_hgt = start
         nc.ref_hgt = start
 
+    h, w = gdir.get_inversion_flowline_hw()
     # do the climate calibration:
     # get here the right melt_f fitting to that precipitation factor
-    h, w = gdir.get_inversion_flowline_hw()
     # find the melt factor that minimises the bias to the geodetic observations
     try:
         melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic,
@@ -432,7 +469,7 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
                                                  pf, False,
                                                  np.arange(2000, ye, 1),  # time period that we want to calibrate
                                                  False, spinup))
-        # we don't need and reference height correction if melt_f calibration has worked!
+        # we don't need a reference height correction if melt_f calibration has worked!
         ref_hgt_calib_diff = 0
     except ValueError or TypeError:
         # This happens when out of bounds
@@ -443,7 +480,6 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
                                        h=h, w=w, pf=pf,
                                        ys=np.arange(2000, ye, 1))
         # _lim0 = modelled - observed(geodetic)
-
 
         if _lim0 < 0:
             # The mass-balances are too positive to be matched - we need to
@@ -478,14 +514,18 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
                                                      np.arange(2000, ye, 1),
                                                      # time period that we want to calibrate
                                                      False, spinup))
-                # @Fabi, if we find one working melt_f we could actually stop
-                # the loop, or???
+
+
             except ValueError or TypeError:
                 melt_f = np.NaN
                 # Done - store for later
             melt_f_candidates[i] = melt_f
+            # @Fabi, if we find one working melt_f we can actually stop
+            # the loop, or???
+            if np.isfinite(melt_f):
+                break
 
-        # only choose those that worked
+        # only choose the one that worked
         sel_steps = steps[np.isfinite(melt_f_candidates)]
         sel_melt_f = melt_f_candidates[np.isfinite(melt_f_candidates)]
         if len(sel_melt_f) == 0:
@@ -493,13 +533,13 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
             raise MassBalanceCalibrationError('We could not find a way to '
                                               'correct the climate data and '
                                               'fit within the prescribed '
-                                              'bounds for mu*.')
-
-        # Now according to all the corrections we have a series of candidates
-        # Her we just pick the first, but to be fair it is arbitrary
-        # We could also pick one randomly...
-        # @fabi: do we take the first one because this is the
-        # nearest to the ref_hgt???
+                                              'bounds for the melt_f.')
+        # now we only have one candidate (the one where we changes the least the ref_hgt)
+        # so we prefer to have a melt_f very near to the allowed range
+        # than having a very large temp_bias (i.e ref_hgt_calib_diff)
+        # @fabi: mu_star_calibration_from_geodetic_mb we take the first one
+        # but compute all, but maybe it makes sense to only compute the first one
+        # because this is the nearest to the ref_hgt???
         melt_f_opt = sel_melt_f[0]
         # Final correction of the data
         with utils.ncDataset(fpath, 'a') as nc:
@@ -508,10 +548,6 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
         gdir.add_to_diagnostics('ref_hgt_calib_diff',
                                 ref_hgt_calib_diff)
         mb_mod.ref_hgt = sel_steps[0]
-
-        #raise NotImplementedError('needs actually to be debugged, tested and'
-        #                      'checked')
-
 
     mb_mod.melt_f = melt_f_opt
     mb_mod.prcp_fac = pf
@@ -522,13 +558,12 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
     np.testing.assert_allclose(mb_geodetic, spec_mb, rtol=1e-2)
     if mb_model_sub_class == TIModel_Sfc_Type:
         mb_mod.reset_pd_mb_bucket()
-    # Fabi?: which starting year? I set it to 2000 !!!
+    # Fabi?: which starting year? I set it to 2000 !!! Is this right?
     # get the apparent_mb (necessary for inversion)
     climate.apparent_mb_from_any_mb(gdir, mb_model=mb_mod,
                                     mb_years=np.arange(2000, ye, 1))
 
     # TODO: maybe also add type of mb_model_sub_class into fs ???
-    # TODO: also need to add ref_hgt
     fs_new = '_{}_{}_{}'.format(climate_type, mb_type,
                                    grad_type)
     d = {'melt_f_pf_{}'.format(np.round(pf, 2)): melt_f_opt,
@@ -550,24 +585,62 @@ def calib_inv_run(gdir=np.NaN, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'li
                   grad_type='cte', y0=2004, hs=10,
                   store_monthly_step=False, unique_samples=False,
                   climate_type='W5E5',
-                  ensemble = 'mri-esm2-0_r1i1p1f1', ssp = 'ssp126'):
-    # does melt_f_calib_geod_prep_inversion,
-    # then calibrate_inversion_from_consensus
-    # then init_present_time_glacier
-    # then it runs either constant, random or from climate for a given period
-    # todo: add better documentation
+                  ensemble = 'mri-esm2-0_r1i1p1f1', ssp = 'ssp126',
+                  ye=2100):
 
-    # ye_h = 2014
-    # y0 = 1979
+    '''
+    Does the calibration, the inversion and then the run using GCM data:
+    First it runs, melt_f_calib_geod_prep_inversion,
+    then calibrate_inversion_from_consensus,
+    then init_present_time_glacier,
+    finally it runs either constant, random or from climate for a given period!
+
+    attention: you need to process first the climate calibration data (e.g. `process_w5e5_data`)
+    and then process the projection gcm data (e.g. `process_isimip_data`)
+
+    attention: here glen-a is calibrated to match a single glaciers
+    volume. Hence, glen-a is different for each glacier if this is applied on several glaciers.
+    In that case, it would be better to write a new function and to tune only one glen-a such
+    that the Farinotti(2019) volume is matched for all projected glaciers ...
+
+    todo: add better documentation and add a test suite for that !!!
+
+    Parameters
+    ----------
+    gdir
+    kwargs_for_TIModel_Sfc_Type
+    mb_elev_feedback
+    nyears
+    seed
+    spinup
+    interpolation_optim
+    run_type
+    mb_model_sub_class
+    pf
+    mb_type
+    grad_type
+    y0
+    hs
+    store_monthly_step
+    unique_samples
+    climate_type
+    ensemble
+    ssp
+    ye
+
+    Returns
+    -------
+
+    '''
+    # end of climate calibration dataset & geodetic data
+    ye_calib = 2019
     dataset = climate_type
-    #gdirs = [gdir]
-
-    ye = 2100
-    ye_calib = 2020
     nosigmaadd = ''
+
     if mb_model_sub_class == TIModel:
         kwargs_for_TIModel_Sfc_Type = {}
     kwargs_for_TIModel_Sfc_Type_calib = kwargs_for_TIModel_Sfc_Type.copy()
+
     if run_type == 'constant' and mb_model_sub_class == TIModel_Sfc_Type:
         # for calibration, no interpolation will be done ...
         kwargs_for_TIModel_Sfc_Type_calib['interpolation_optim'] = False
@@ -576,18 +649,18 @@ def calib_inv_run(gdir=np.NaN, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'li
                                  pf=pf,  # precipitation factor
                                  mb_type=mb_type, grad_type=grad_type,
                                  climate_type=climate_type, residual=0,
-                                 ye=ye_calib,
+                                 ye=ye_calib+1,
                                  mb_model_sub_class=mb_model_sub_class,
                                  kwargs_for_TIModel_Sfc_Type=kwargs_for_TIModel_Sfc_Type_calib,
                                  spinup=spinup)
 
-    # here glen-a is calibrated to mathch gdirs glaciers in total
+    # here glen-a is calibrated to match each glaciers volume (glen-a is different for each glacier!!!)
     border = 80
     filter = border >= 20
     pd_inv_melt_f = workflow.calibrate_inversion_from_consensus([gdir],
-                                                                     apply_fs_on_mismatch=False,
-                                                                     error_on_mismatch=False,
-                                                                     filter_inversion_output=filter)
+                                                                apply_fs_on_mismatch=False,
+                                                                error_on_mismatch=False,
+                                                                filter_inversion_output=filter)
     workflow.execute_entity_task(tasks.init_present_time_glacier, [gdir])
 
     a_factor = gdir.get_diagnostics()['inversion_glen_a'] / cfg.PARAMS['inversion_glen_a']
@@ -604,32 +677,33 @@ def calib_inv_run(gdir=np.NaN, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'li
         add_msm = 'sfc_type_{}_tau_{}_{}_update_ratio{}_mb_fb_{}'.format(kwargs_for_TIModel_Sfc_Type['melt_f_change'],
                                                                          kwargs_for_TIModel_Sfc_Type['tau_e_fold_yr'],
                                                                          kwargs_for_TIModel_Sfc_Type['melt_f_update'],
-                                                                         kwargs_for_TIModel_Sfc_Type[
-                                                                             'melt_f_ratio_snow_to_ice'],
+                                                                         kwargs_for_TIModel_Sfc_Type['melt_f_ratio_snow_to_ice'],
                                                                          mb_elev_feedback)
     else:
         add_msm = 'TIModel_no_sfc_type_distinction_mb_fb_{}'
     j = 'test'
     add = 'pf{}'.format(pf)
-    fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
-    gdir.read_json(filename='melt_f_geod', filesuffix=fs)
     rid = '{}_{}_{}'.format('ISIMIP3b', ensemble, ssp)
     if run_type == 'constant':
         run_model = run_constant_climate_TIModel(gdir, bias=0, nyears=nyears,
                                                  y0=y0, halfsize=hs,
                                                  mb_type=mb_type,
                                                  climate_filename='gcm_data',
-                                                 grad_type=grad_type, precipitation_factor=pf,
-                                                 melt_f=gdir.read_json(filename='melt_f_geod', filesuffix=fs)[
-                                                     f'melt_f_pf_{pf}'],
-                                                 climate_input_filesuffix=rid,  # dataset,
+                                                 grad_type=grad_type,
+                                                 precipitation_factor=pf,
+                                                 climate_type=climate_type, # dataset for the calibration
+                                                 # changed this here to also include possible temp.bias correction
+                                                 # but not yet tested!!!
+                                                 # melt_f=gdir.read_json(filename='melt_f_geod',
+                                                 # filesuffix=fs)[f'melt_f_pf_{pf}'],
+                                                 melt_f='from_json',
+                                                 climate_input_filesuffix=rid,  # dataset for the run
                                                  output_filesuffix='_{}{}_ISIMIP3b_{}_{}_{}_{}{}_hist_{}_{}'.format(
                                                      nosigmaadd, add_msm,
                                                      dataset, ensemble, mb_type, grad_type,
                                                      add, ssp, j),
                                                  mb_model_sub_class=mb_model_sub_class,
                                                  kwargs_for_TIModel_Sfc_Type=kwargs_for_TIModel_Sfc_Type,
-                                                 # {'melt_f_change':'linear'},
                                                  mb_elev_feedback=mb_elev_feedback,
                                                  interpolation_optim=interpolation_optim,
                                                  store_monthly_step=store_monthly_step)
@@ -639,17 +713,22 @@ def calib_inv_run(gdir=np.NaN, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'li
                                                temperature_bias=None,
                                                mb_type=mb_type, grad_type=grad_type,
                                                bias=0, seed=seed,
-                                               melt_f=gdir.read_json(filename='melt_f_geod', filesuffix=fs)[
-                                                   f'melt_f_pf_{pf}'],
+                                               climate_type=climate_type,  # dataset for the calibration
+                                               # changed this here to also include possible temp.bias correction
+                                               # but not yet tested!!!
+                                               # melt_f=gdir.read_json(filename='melt_f_geod',
+                                               # filesuffix=fs)[f'melt_f_pf_{pf}'],
+                                               melt_f='from_json',
+                                               climate_input_filesuffix=rid,  # dataset for the run
                                                precipitation_factor=pf,
                                                climate_filename='gcm_data',
-                                               climate_input_filesuffix=rid,
                                                output_filesuffix='_{}{}_ISIMIP3b_{}_{}_{}_{}{}_hist_{}_{}'.format(
                                                    nosigmaadd, add_msm,
                                                    dataset, ensemble, mb_type, grad_type, add, ssp, j),
                                                kwargs_for_TIModel_Sfc_Type=kwargs_for_TIModel_Sfc_Type,
                                                # {'melt_f_change':'linear'},
-                                               mb_elev_feedback=mb_elev_feedback, store_monthly_step=store_monthly_step,
+                                               mb_elev_feedback=mb_elev_feedback,
+                                               store_monthly_step=store_monthly_step,
                                                unique_samples=unique_samples)
 
     elif run_type == 'from_climate':
@@ -657,9 +736,13 @@ def calib_inv_run(gdir=np.NaN, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'li
                                                   ye=2100, mb_type=mb_type,
                                                   climate_filename='gcm_data',
                                                   grad_type=grad_type, precipitation_factor=pf,
-                                                  melt_f=gdir.read_json(filename='melt_f_geod', filesuffix=fs)[
-                                                      f'melt_f_pf_{pf}'],
-                                                  climate_input_filesuffix=rid,  # dataset,
+                                                  climate_type=climate_type,  # dataset for the calibration
+                                                  # changed this here to also include possible temp.bias correction
+                                                  # but not yet tested!!!
+                                                  # melt_f=gdir.read_json(filename='melt_f_geod',
+                                                  # filesuffix=fs)[f'melt_f_pf_{pf}'],
+                                                  melt_f='from_json',
+                                                  climate_input_filesuffix=rid,  # dataset for the run
                                                   output_filesuffix='_{}{}_ISIMIP3b_{}_{}_{}_{}{}_hist_{}_{}'.format(
                                                       nosigmaadd, add_msm,
                                                       dataset, ensemble, mb_type, grad_type, add, ssp, j),
@@ -674,7 +757,7 @@ def calib_inv_run(gdir=np.NaN, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'li
                                                                                                     mb_type, grad_type,
                                                                                                     add, ssp, j))
 
-    # init_model_filesuffix='{}{}_ISIMIP3b_{}_{}_{}_{}{}_historical_{}'.format(nosigmaadd,add_msm,
+    fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
 
     return ds, gdir.read_json(filename='melt_f_geod', filesuffix=fs)[f'melt_f_pf_{pf}'], run_model
 
