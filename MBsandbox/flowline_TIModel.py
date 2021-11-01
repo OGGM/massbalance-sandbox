@@ -34,6 +34,7 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
                                   max_ys=None,
                                   store_monthly_step=False,
                                   climate_filename='climate_historical',
+                                  climate_type='',
                                   climate_input_filesuffix='',
                                   output_filesuffix='',
                                   init_model_filesuffix=None,
@@ -84,8 +85,14 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
     climate_filename : str
         name of the climate file, e.g. 'climate_historical' (default) or
         'gcm_data'
+    climate_type : str
+        if we use 'gcm_data', this is the climate calibration dataset
+        (e.g. e.g. 'W5E5' or 'WFDE5_CRU')
+        if this is empty, the climate_input_filesuffix is used
     climate_input_filesuffix: str
-        filesuffix for the input climate file, use e.g. 'W5E5' or 'WFDE5_CRU'
+        filesuffix for the input climate file,
+        if we use 'climate_historical', this can be e.g. 'W5E5' or 'WFDE5_CRU',
+        if we use 'gcm_data', it can be 'ISIMIP3b_ensemble_ssp'
     output_filesuffix : str
         for the output file
     init_model_filesuffix : str
@@ -113,7 +120,8 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
     kwargs : dict
         kwargs to pass to the FluxBasedModel instance
     """
-
+    if climate_type == '':
+        climate_type = climate_input_filesuffix
     if init_model_filesuffix is not None:
         fp = gdir.get_filepath('model_geometry',
                                filesuffix=init_model_filesuffix)
@@ -145,7 +153,7 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
         ys = ys if ys < max_ys else max_ys
 
     if melt_f == 'from_json':
-        fs = '_{}_{}_{}'.format(climate_input_filesuffix, mb_type, grad_type)
+        fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
         d = gdir.read_json(filename='melt_f_geod', filesuffix=fs)
         # get the calibrated melt_f that suits to the prcp factor
         try:
@@ -221,15 +229,16 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                                temperature_bias=None,
                                mb_type='mb_monthly', grad_type='cte',
                                bias=0, seed=None,
-                       melt_f=None,
-                       precipitation_factor=None,
-                       store_monthly_step=False,
-                       store_model_geometry=None,
-                       climate_filename='climate_historical',
-                       climate_input_filesuffix='',
-                       output_filesuffix='', init_model_fls=None,
-                       zero_initial_glacier=False,
-                       unique_samples=False, #melt_f_file=None,
+                               melt_f=None,
+                               precipitation_factor=None,
+                               store_monthly_step=False,
+                               store_model_geometry=None,
+                               climate_filename='climate_historical',
+                               climate_type='',
+                               climate_input_filesuffix='',
+                               output_filesuffix='', init_model_fls=None,
+                               zero_initial_glacier=False,
+                               unique_samples=False, #melt_f_file=None,
                                reset = True,
                                kwargs_for_TIModel_Sfc_Type={},
                                **kwargs):
@@ -270,8 +279,14 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
     climate_filename : str
         name of the climate file, e.g. 'climate_historical' (default) or
         'gcm_data'
+    climate_type : str
+        if we use 'gcm_data', this is the climate calibration dataset
+        (e.g. e.g. 'W5E5' or 'WFDE5_CRU')
+        if this is empty, the climate_input_filesuffix is used
     climate_input_filesuffix: str
-        filesuffix for the input climate file, use e.g. 'W5E5' or 'WFDE5_CRU'
+        filesuffix for the input climate file,
+        if we use 'climate_historical', this can be e.g. 'W5E5' or 'WFDE5_CRU',
+        if we use 'gcm_data', it can be 'ISIMIP3b_ensemble_ssp'
     output_filesuffix : str
         for the output file
     init_model_filesuffix : str
@@ -302,8 +317,11 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
     kwargs : dict
         kwargs to pass to the FluxBasedModel instance
     """
+    if climate_type == '':
+        climate_type = climate_input_filesuffix
+
     if melt_f == 'from_json':
-        fs = '_{}_{}_{}'.format(climate_input_filesuffix, mb_type, grad_type)
+        fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
         d = gdir.read_json(filename='melt_f_geod', filesuffix=fs)
         # get the calibrated melt_f that suits to the prcp factor
         try:
@@ -391,6 +409,7 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                          init_model_yr=None,
                          output_filesuffix='',
                          climate_filename='climate_historical',
+                         climate_type='',
                          climate_input_filesuffix='',
                          mb_model_sub_class=TIModel,
                          init_model_fls=None,
@@ -403,7 +422,7 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
     """Runs the constant mass-balance model of the TIModel
      for a given number of years.
 
-     This is equivalen to run_constant_climate but is compatible with TIModel
+     This is equivalent to run_constant_climate but is compatible with TIModel
 
     This will initialize a
     :py:class:`oggm.core.massbalance.MultipleFlowlineMassBalance_TIModel`,
@@ -447,8 +466,14 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
     climate_filename : str
         name of the climate file, e.g. 'climate_historical' (default) or
         'gcm_data'
+    climate_type : str
+        if we use 'gcm_data', this is the climate calibration dataset
+        (e.g. e.g. 'W5E5' or 'WFDE5_CRU')
+        if this is empty, the climate_input_filesuffix is used
     climate_input_filesuffix: str
-        filesuffix for the input climate file
+        filesuffix for the input climate file,
+        if we use 'climate_historical', this can be e.g. 'W5E5' or 'WFDE5_CRU',
+        if we use 'gcm_data', it can be 'ISIMIP3b_ensemble_ssp'
     output_filesuffix : str
         this add a suffix to the output file (useful to avoid overwriting
         previous experiments)
@@ -468,8 +493,8 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
     kwargs : dict
         kwargs to pass to the FluxBasedModel instance
     """
-
-    # NotImplementedError('work in process...')
+    if climate_type == '':
+        climate_type = climate_input_filesuffix
 
     if init_model_filesuffix is not None:
         fp = gdir.get_filepath('model_geometry',
@@ -480,9 +505,8 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         fmod.run_until(init_model_yr)
         init_model_fls = fmod.fls
 
-
     if melt_f == 'from_json':
-        fs = '_{}_{}_{}'.format(climate_input_filesuffix, mb_type, grad_type)
+        fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
         d = gdir.read_json(filename='melt_f_geod', filesuffix=fs)
         # get the calibrated melt_f that suits to the prcp factor
         try:
