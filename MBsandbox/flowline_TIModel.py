@@ -577,7 +577,7 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                               **kwargs)
 
 @entity_task(log)
-def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=False, **kwargs):
+def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=False, store_annual=True, **kwargs):
     """Run the flowline model and add hydro diagnostics on daily basis (experimental!).
     Parameters
     ----------
@@ -919,24 +919,25 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
         if varname not in out_vars:
             continue
         if len(data.shape) == 2:
-            # First the annual agg
-            if varname == 'snow_bucket':
-                # Snowbucket is a state variable
-                ods[varname] = ('time', data[:, 0])
-            else:
-                # Last year is never good
-                data[-1, :] = np.NaN
-                var_annual = np.nansum(data, axis=1)
-                var_annual[-1] = np.NaN
-                ods[varname] = ('time', var_annual)
+            if store_annual == True:
+                # First the annual agg
+                if varname == 'snow_bucket':
+                    # Snowbucket is a state variable
+                    ods[varname] = ('time', data[:, 0])
+                else:
+                    # Last year is never good
+                    data[-1, :] = np.NaN
+                    var_annual = np.nansum(data, axis=1)
+                    var_annual[-1] = np.NaN
+                    ods[varname] = ('time', var_annual)
             # Then the daily ones
             ods[varname + '_daily'] = (('time', 'day_2d'), data)
         else:
             assert varname != 'snow_bucket'
             data[-1] = np.NaN
             ods[varname] = ('time', data)
-        for k, v in d.items():
-            ods[varname].attrs[k] = v
+        # for k, v in d.items():
+        #     ods[varname].attrs[k] = v
 
     # Append the output to the existing diagnostics
     fpath = gdir.get_filepath('model_diagnostics', filesuffix=suffix)
