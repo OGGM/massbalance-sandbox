@@ -577,7 +577,7 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                               **kwargs)
 
 @entity_task(log)
-def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=False, store_annual=True, **kwargs):
+def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, fixed_geometry_spinup_yr=None, Testing=False, store_annual=True, **kwargs):
     """Run the flowline model and add hydro diagnostics on daily basis (experimental!).
     Parameters
     ----------
@@ -590,9 +590,16 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
         per default is the largest area covered by the glacier in the simulation
         period. Use this kwarg to force a specific area to the state of the
         glacier at the provided simulation year.
+    fixed_geometry_spinup_yr : int
+        if set to an integer, the model will artificially prolongate
+        all outputs of run_until_and_store to encompass all time stamps
+        starting from the chosen year. The only output affected are the
+        glacier wide diagnostic files - all other outputs are set
+        to constants during "spinup"
     Testing: if set to true, the 29th of February is set to nan values in non-leap years, so that the remaining days
         are at the same index in non-leap and leap years, if set to false the last 366th day in non-leap years
         is set to zero
+    store_annual: whether to store annual outputs or only daily outputs
     **kwargs : all valid kwargs for ``run_task``
     """
 
@@ -607,10 +614,16 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
         raise InvalidParamsError('run_with_hydro_daily only compatible with '
                                  "mb_elev_feedback='annual' (yes, even "
                                  "when asked for monthly hydro output).")
-    out = run_task(gdir, **kwargs)
+    out = run_task(gdir, fixed_geometry_spinup_yr=fixed_geometry_spinup_yr,
+                   **kwargs)
     if out is None:
         raise InvalidWorkflowError('The run task ({}) did not run '
                                    'successfully.'.format(run_task.__name__))
+
+    do_spinup = fixed_geometry_spinup_yr is not None
+    if do_spinup:
+        start_dyna_model_yr = out.y0
+
 
     # Mass balance model used during the run
     mb_mod = out.mb_model
@@ -847,14 +860,19 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
         out['off_area']['data'][i] = np.sum(off_area)
         out['on_area']['data'][i] = np.sum(bin_area)
 
-        # Correct for mass-conservation and match the ice-dynamics model
-        fmod.run_until(yr + 1)
-        model_mb = (fmod.volume_m3 - prev_model_vol) * cfg.PARAMS['ice_density']
-        prev_model_vol = fmod.volume_m3
+        if do_spinup and yr < start_dyna_model_yr:
+            residual_mb = 0
+            model_mb = (out['snowfall_on_glacier']['data'][i, :].sum() -
+                        out['melt_on_glacier']['data'][i, :].sum())
+        else:
+            # Correct for mass-conservation and match the ice-dynamics model
+            fmod.run_until(yr + 1)
+            model_mb = (fmod.volume_m3 - prev_model_vol) * cfg.PARAMS['ice_density']
+            prev_model_vol = fmod.volume_m3
 
-        reconstructed_mb = (out['snowfall_on_glacier']['data'][i, :].sum() -
-                            out['melt_on_glacier']['data'][i, :].sum())
-        residual_mb = model_mb - reconstructed_mb
+            reconstructed_mb = (out['snowfall_on_glacier']['data'][i, :].sum() -
+                                out['melt_on_glacier']['data'][i, :].sum())
+            residual_mb = model_mb - reconstructed_mb
 
         # Now correct
         # We try to correct the melt only where there is some
