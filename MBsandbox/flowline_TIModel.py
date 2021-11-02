@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 @entity_task(log)
 def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
                                   max_ys=None,
+                                  fixed_geometry_spinup_yr=None,
                                   store_monthly_step=False,
                                   climate_filename='climate_historical',
                                   climate_type='',
@@ -74,6 +75,12 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
     max_ys : int
         if you want to impose a maximum start year, regardless if the glacier
         inventory date is later (e.g. if climate data does not reach).
+    fixed_geometry_spinup_yr : int
+        if set to an integer, the model will artificially prolongate
+        all outputs of run_until_and_store to encompass all time stamps
+        starting from the chosen year. The only output affected are the
+        glacier wide diagnostic files - all other outputs are set
+        to constants during "spinup"
     store_monthly_step : bool
         whether to store the diagnostic data at a monthly time step or not
         (default is yearly)
@@ -134,17 +141,24 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
         if ys is None:
             ys = init_model_yr
 
+    try:
+        rgi_year = gdir.rgi_date.year
+    except AttributeError:
+        rgi_year = gdir.rgi_date
+
     # Take from rgi date if not set yet
     if ys is None:
-        try:
-            ys = gdir.rgi_date.year
-        except AttributeError:
-            ys = gdir.rgi_date
         # The RGI timestamp is in calendar date - we convert to hydro date,
         # i.e. 2003 becomes 2004 (so that we don't count the MB year 2003
         # in the simulation)
         # See also: https://github.com/OGGM/oggm/issues/1020
-        ys += 1
+        ys = rgi_year + 1
+
+    if ys <= rgi_year and init_model_filesuffix is None:
+        log.warning('You are attempting to run_with_climate_data at dates '
+                    'prior to the RGI inventory date. This may indicate some '
+                    'problem in your workflow. Consider using '
+                    '`fixed_geometry_spinup_yr` for example.')
 
     # Final crop
     if min_ys is not None:
@@ -220,6 +234,7 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
                               store_monthly_step=store_monthly_step,
                               init_model_fls=init_model_fls,
                               zero_initial_glacier=zero_initial_glacier,
+                              fixed_geometry_spinup_yr=fixed_geometry_spinup_yr,
                               **kwargs)
 
 
