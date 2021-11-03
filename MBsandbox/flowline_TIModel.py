@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 @entity_task(log)
 def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
                                   max_ys=None,
+                                  fixed_geometry_spinup_yr=None,
                                   store_monthly_step=False,
                                   climate_filename='climate_historical',
                                   climate_type='',
@@ -74,6 +75,12 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
     max_ys : int
         if you want to impose a maximum start year, regardless if the glacier
         inventory date is later (e.g. if climate data does not reach).
+    fixed_geometry_spinup_yr : int
+        if set to an integer, the model will artificially prolongate
+        all outputs of run_until_and_store to encompass all time stamps
+        starting from the chosen year. The only output affected are the
+        glacier wide diagnostic files - all other outputs are set
+        to constants during "spinup"
     store_monthly_step : bool
         whether to store the diagnostic data at a monthly time step or not
         (default is yearly)
@@ -134,17 +141,24 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
         if ys is None:
             ys = init_model_yr
 
+    try:
+        rgi_year = gdir.rgi_date.year
+    except AttributeError:
+        rgi_year = gdir.rgi_date
+
     # Take from rgi date if not set yet
     if ys is None:
-        try:
-            ys = gdir.rgi_date.year
-        except AttributeError:
-            ys = gdir.rgi_date
         # The RGI timestamp is in calendar date - we convert to hydro date,
         # i.e. 2003 becomes 2004 (so that we don't count the MB year 2003
         # in the simulation)
         # See also: https://github.com/OGGM/oggm/issues/1020
-        ys += 1
+        ys = rgi_year + 1
+
+    if ys <= rgi_year and init_model_filesuffix is None:
+        log.warning('You are attempting to run_with_climate_data at dates '
+                    'prior to the RGI inventory date. This may indicate some '
+                    'problem in your workflow. Consider using '
+                    '`fixed_geometry_spinup_yr` for example.')
 
     # Final crop
     if min_ys is not None:
@@ -220,6 +234,7 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
                               store_monthly_step=store_monthly_step,
                               init_model_fls=init_model_fls,
                               zero_initial_glacier=zero_initial_glacier,
+                              fixed_geometry_spinup_yr=fixed_geometry_spinup_yr,
                               **kwargs)
 
 
@@ -577,7 +592,9 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                               **kwargs)
 
 @entity_task(log)
-def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=False, store_annual=True, **kwargs):
+def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False,
+                         ref_area_yr=None, ref_geometry_filesuffix=None,
+                         fixed_geometry_spinup_yr=None, Testing=False, store_annual=True, **kwargs):
     """Run the flowline model and add hydro diagnostics on daily basis (experimental!).
     Parameters
     ----------
@@ -585,14 +602,29 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
         any of the `run_*`` tasks in the MBSandbox.flowline_TIModel module.
         The mass-balance model used needs to have the `add_climate` output
         kwarg available though.
-    ref_area_from_y0 : bool
+    ref_area_yr : int
         the hydrological output is computed over a reference area, which
         per default is the largest area covered by the glacier in the simulation
         period. Use this kwarg to force a specific area to the state of the
         glacier at the provided simulation year.
+    ref_area_from_y0 : bool
+        overwrite ref_area_yr to the first year of the timeseries
+    ref_geometry_filesuffix : str
+        this kwarg allows to copy the reference area from a previous simulation
+        (useful for projections with historical spinup for example).
+        Set to a model_geometry file filesuffix that is present in the
+        current directory (e.g. `_historical` for pre-processed gdirs).
+        If set, ref_area_yr and ref_area_from_y0 refer to this file instead.
+    fixed_geometry_spinup_yr : int
+        if set to an integer, the model will artificially prolongate
+        all outputs of run_until_and_store to encompass all time stamps
+        starting from the chosen year. The only output affected are the
+        glacier wide diagnostic files - all other outputs are set
+        to constants during "spinup"
     Testing: if set to true, the 29th of February is set to nan values in non-leap years, so that the remaining days
         are at the same index in non-leap and leap years, if set to false the last 366th day in non-leap years
         is set to zero
+    store_annual: whether to store annual outputs or only daily outputs
     **kwargs : all valid kwargs for ``run_task``
     """
 
@@ -607,10 +639,16 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
         raise InvalidParamsError('run_with_hydro_daily only compatible with '
                                  "mb_elev_feedback='annual' (yes, even "
                                  "when asked for monthly hydro output).")
-    out = run_task(gdir, **kwargs)
+    out = run_task(gdir, fixed_geometry_spinup_yr=fixed_geometry_spinup_yr,
+                   **kwargs)
     if out is None:
         raise InvalidWorkflowError('The run task ({}) did not run '
                                    'successfully.'.format(run_task.__name__))
+
+    do_spinup = fixed_geometry_spinup_yr is not None
+    if do_spinup:
+        start_dyna_model_yr = out.y0
+
 
     # Mass balance model used during the run
     mb_mod = out.mb_model
@@ -618,18 +656,41 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
     # Glacier geometry during the run
     suffix = kwargs.get('output_filesuffix', '')
 
-    # We start by fetching mass balance data and geometry for all years
-    # model_geometry files always retrieve yearly timesteps
+    # We start by fetching the reference model geometry
+    # The one we just computed
     fmod = FileModel(gdir.get_filepath('model_geometry', filesuffix=suffix))
     # The last one is the final state - we can't compute MB for that
     years = fmod.years[:-1]
+
+    if ref_geometry_filesuffix:
+        if not ref_area_from_y0 and ref_area_yr is None:
+            raise InvalidParamsError('If `ref_geometry_filesuffix` is set, '
+                                     'users need to specify `ref_area_from_y0`'
+                                     ' or `ref_area_yr`')
+        # User provided
+        fmod_ref = FileModel(gdir.get_filepath('model_geometry',
+                                               filesuffix=ref_geometry_filesuffix))
+    else:
+        # ours as well
+        fmod_ref = fmod
+
+    # Check input
+    if ref_area_from_y0:
+        ref_area_yr = fmod_ref.years[0]
+
+    # Geometry at year yr to start with + off-glacier snow bucket
+    if ref_area_yr is not None:
+        if ref_area_yr not in fmod_ref.years:
+            raise InvalidParamsError('The chosen ref_area_yr is not '
+                                     'available!')
+        fmod_ref.run_until(ref_area_yr)
 
     # Geometry at y0 to start with + off-glacier snow bucket
     bin_area_2ds = []
     bin_elev_2ds = []
     ref_areas = []
     snow_buckets = []
-    for fl in fmod.fls:
+    for fl in fmod_ref.fls:
         # Glacier area on bins
         bin_area = fl.bin_area_m2
 
@@ -654,7 +715,7 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
             bin_area_2d[i, :] = fl.bin_area_m2
             bin_elev_2d[i, :] = fl.surface_h
 
-    if not ref_area_from_y0:
+    if ref_area_yr is None:
         # Ok we get the max area instead
         for ref_area, bin_area_2d in zip(ref_areas, bin_area_2ds):
             ref_area[:] = bin_area_2d.max(axis=0)
@@ -847,14 +908,19 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False, Testing=Fa
         out['off_area']['data'][i] = np.sum(off_area)
         out['on_area']['data'][i] = np.sum(bin_area)
 
-        # Correct for mass-conservation and match the ice-dynamics model
-        fmod.run_until(yr + 1)
-        model_mb = (fmod.volume_m3 - prev_model_vol) * cfg.PARAMS['ice_density']
-        prev_model_vol = fmod.volume_m3
+        if do_spinup and yr < start_dyna_model_yr:
+            residual_mb = 0
+            model_mb = (out['snowfall_on_glacier']['data'][i, :].sum() -
+                        out['melt_on_glacier']['data'][i, :].sum())
+        else:
+            # Correct for mass-conservation and match the ice-dynamics model
+            fmod.run_until(yr + 1)
+            model_mb = (fmod.volume_m3 - prev_model_vol) * cfg.PARAMS['ice_density']
+            prev_model_vol = fmod.volume_m3
 
-        reconstructed_mb = (out['snowfall_on_glacier']['data'][i, :].sum() -
-                            out['melt_on_glacier']['data'][i, :].sum())
-        residual_mb = model_mb - reconstructed_mb
+            reconstructed_mb = (out['snowfall_on_glacier']['data'][i, :].sum() -
+                                out['melt_on_glacier']['data'][i, :].sum())
+            residual_mb = model_mb - reconstructed_mb
 
         # Now correct
         # We try to correct the melt only where there is some
