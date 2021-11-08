@@ -652,7 +652,6 @@ def process_gcm_data_adv_daily(gdir, output_filesuffix='', prcp=None,
                 # more correct would be to delete Feb 29th, however,
                 # we prefer to be consistent with the climate dataset
                 # (e.g. WFDE5_CRU)
-
                 gradient_ls.append(np.delete(hist_gradient, 366 - 1))
             elif aod.sel(year=y) == 366:
                 gradient_ls.append(hist_gradient)
@@ -748,15 +747,15 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
                 fpath_precip, fpath_precip_h]:
         if temporal_resol == 'monthly':
             if cluster:
-                path = '/home/www/lschuster/isimip3b_flat/monthly/'
+                path = '/home/www/lschuster/isimip3b_flat/flat/monthly/'
             else:
-                path = 'https://cluster.klima.uni-bremen.de/~lschuster/isimip3b_flat/monthly/'
+                path = 'https://cluster.klima.uni-bremen.de/~lschuster/isimip3b_flat/flat/monthly/'
             add = '_global_monthly_flat_glaciers.nc'
         elif temporal_resol == 'daily':
             if cluster:
-                path = '/home/www/lschuster/isimip3b_flat/daily/'
+                path = '/home/www/lschuster/isimip3b_flat/flat/daily/'
             else:
-                path = 'https://cluster.klima.uni-bremen.de/~lschuster/isimip3b_flat/daily/'
+                path = 'https://cluster.klima.uni-bremen.de/~lschuster/isimip3b_flat/flat/daily/'
             add = '_global_daily_flat_glaciers.nc'
 
         fpath_spec = path + '{}_w5e5_'.format(ensemble) + '{ssp}_{var}' + add
