@@ -48,6 +48,7 @@ class Test_hydro:
         # Add debug vars
         cfg.PARAMS['store_diagnostic_variables'] = ALL_DIAGS
         cfg.PARAMS['hydro_month_nh'] = 1
+        cfg.PARAMS['store_model_geometry'] = True  # Hydro outputs needs the full model geometry
 
         pf = 2
         climate_type = 'W5E5'
@@ -171,7 +172,6 @@ class Test_hydro:
                 assert np.argmin(odf['off_area']) -15 <= np.argmax(odf[var[0]]) <= np.argmin(odf['off_area']) +15
             # odf['on_area'].argmax()
 
-
         # Residual MB should not be crazy large
         frac = odf['residual_mb'] / odf['melt_on_glacier']
         #this assertion does not work on other glacier, (e.g. RGI60-11.00890 reaches 0.25!!)
@@ -193,6 +193,7 @@ class Test_hydro:
         # Add debug vars
         cfg.PARAMS['store_diagnostic_variables'] = ALL_DIAGS
         cfg.PARAMS['hydro_month_nh'] = 1
+        cfg.PARAMS['store_model_geometry'] = True  # Hydro outputs needs the full model geometry
 
         pf = 2
         climate_type= 'W5E5'
@@ -340,6 +341,7 @@ class Test_hydro:
         mb_bias = 0
         cfg.PARAMS['store_diagnostic_variables'] = ALL_DIAGS
         cfg.PARAMS['hydro_month_nh'] = 1
+        cfg.PARAMS['store_model_geometry'] = True  # Hydro outputs needs the full model geometry
 
         pf = 2
         climate_type = 'W5E5'
@@ -530,6 +532,7 @@ class Test_hydro:
         mb_bias = 0
         cfg.PARAMS['store_diagnostic_variables'] = ALL_DIAGS
         cfg.PARAMS['hydro_month_nh'] = 1
+        cfg.PARAMS['store_model_geometry'] = True  # Hydro outputs needs the full model geometry
 
         pf = 2
         climate_type = 'W5E5'

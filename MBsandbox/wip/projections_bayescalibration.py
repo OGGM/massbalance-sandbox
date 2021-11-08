@@ -3,15 +3,15 @@ import pymc3 as pm
 import numpy as np
 import pandas as pd
 import xarray as xr
-import seaborn as sns
-import pickle
-import ast
+#import seaborn as sns
+#import pickle
+#import ast
 
 import matplotlib.pyplot as plt
 import matplotlib
 
 # %matplotlib inline
-import statsmodels as stats
+#import statsmodels as stats
 import scipy
 import scipy.stats as stats
 from IPython.core.pylabtools import figsize
