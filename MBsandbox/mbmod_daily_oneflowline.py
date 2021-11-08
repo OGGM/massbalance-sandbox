@@ -3281,6 +3281,8 @@ def fixed_geometry_mass_balance_TIModel(gdir, ys=None, ye=None,
         'gcm_data'
     climate_input_filesuffix: str
         filesuffix for the input climate file
+    ds_gcm : xarray dataset
+        netCDF dataset output of the gdir 
     **kwargs:
         added to MultipleFlowlineMassBalance_TIModel
     """
@@ -3324,7 +3326,10 @@ def compile_fixed_geometry_mass_balance_TIModel(gdirs, filesuffix='',
                                         ys=None, ye=None, years=None,
                                         ds_gcm=None,
                                         **kwargs):
-    """Compiles a table of specific mass-balance timeseries for all glaciers.
+    """
+    same as `compile_fixed_geometry_mass_balance` but compatible to TIModel
+
+    Compiles a table of specific mass-balance timeseries for all glaciers.
 
     The file is stored in a hdf file (not csv) per default. Use pd.read_hdf
     to open it.
