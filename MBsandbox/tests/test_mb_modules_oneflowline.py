@@ -886,6 +886,7 @@ class Test_geodetic_hydro1:
             #assert_allclose(prcp_facs[0], prcp_facs[1])
 
     def test_daily_monthly_annual_specific_mb(self, gdir):
+        # this does not work because of different days of years at the moment!!!
         # for both ERA5 and WFDE5
 
         cfg.PARAMS['hydro_month_nh'] = 1  # 0
@@ -993,8 +994,6 @@ class Test_geodetic_hydro1:
                     np.testing.assert_allclose(spec_mb_daily_yearly_sum,
                                                spec_mb_annually,
                                                rtol=1e-4)  # would need 5e-2
-
-#
 
 
     def test_melt_f_calib_geod_prep_inversion(self):
