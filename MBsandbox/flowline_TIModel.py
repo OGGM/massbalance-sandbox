@@ -211,8 +211,9 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
         # instead of the quality check we corrected the height already inside of
         # melt_f_calib_geod_prep_inversion if no suitable melt_f was found
         # let's just check if this has worked
-        np.testing.assert_allclose(ref_hgt_calib_diff,
-                        mb.flowline_mb_models[-1].ref_hgt - mb.flowline_mb_models[-1].uncorrected_ref_hgt)
+        if not climate_filename == 'gcm_data':
+            np.testing.assert_allclose(ref_hgt_calib_diff,
+                            mb.flowline_mb_models[-1].ref_hgt - mb.flowline_mb_models[-1].uncorrected_ref_hgt)
     else:
         # do the quality check!
         mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
