@@ -72,6 +72,12 @@ BASENAMES['MSWEP_daily'] = {
     # there is no orography file for MSWEP!!! (and also no temperature file)
     }
 
+BASENAMES['W5E5_daily_dw'] = {
+    'inv': 'ISIMIP3a/flattened/daily/gswp3-w5e5_obsclim_glacier_invariant_flat.nc',
+    'tmp': 'ISIMIP3a/flattened/daily/gswp3-w5e5_obsclim_tas_global_daily_flat_glaciers_1979_2019.nc',
+    'prcp': 'ISIMIP3a/flattened/daily/gswp3-w5e5_obsclim_pr_global_daily_flat_glaciers_1979_2019.nc',
+    }
+
 
 def get_w5e5_file(dataset='W5E5_daily', var=None,
                   server='https://cluster.klima.uni-bremen.de/~lschuster/'):
@@ -397,6 +403,10 @@ def process_w5e5_data(gdir, y0=None, y1=None, temporal_resol='daily',
         # (for both the daily dataset and resample to monthly)
         dataset = 'W5E5_daily'
         dataset_prcp = dataset
+    elif climate_type == 'W5E5_dw':
+        output_filesuffix_def = '_daily_W5E5_dw'
+        dataset = 'W5E5_daily_dw'
+        dataset_prcp = dataset
     elif climate_type =='W5E5_MSWEP':
         if temporal_resol == 'monthly':
             output_filesuffix_def = '_monthly_W5E5_MSWEP'
@@ -433,9 +443,14 @@ def process_w5e5_data(gdir, y0=None, y1=None, temporal_resol='daily',
         path_inv = cluster_path + BASENAMES[dataset]['inv']
 
     else:
-        path_tmp = get_w5e5_file(dataset, 'tmp')
-        path_prcp = get_w5e5_file(dataset_prcp, 'prcp')
-        path_inv = get_w5e5_file(dataset, 'inv')
+        if climate_type != 'W5E5_dw':
+            path_tmp = get_w5e5_file(dataset, 'tmp')
+            path_prcp = get_w5e5_file(dataset_prcp, 'prcp')
+            path_inv = get_w5e5_file(dataset, 'inv')
+        elif climate_type == 'W5E5_dw':
+            path_tmp = get_w5e5_file(dataset, 'tmp', server='https://cluster.klima.uni-bremen.de/~shanus/')
+            path_prcp = get_w5e5_file(dataset_prcp, 'prcp', server='https://cluster.klima.uni-bremen.de/~shanus/')
+            path_inv = get_w5e5_file(dataset, 'inv', server='https://cluster.klima.uni-bremen.de/~shanus/')
 
     # Use xarray to read the data
     # would go faster with netCDF -.-
@@ -460,7 +475,7 @@ def process_w5e5_data(gdir, y0=None, y1=None, temporal_resol='daily',
                 text = 'The climate files only go from 1979--2018,\
                     choose another y0 and y1'
                 raise InvalidParamsError(text)
-        elif climate_type == 'W5E5' or climate_type == 'W5E5_MSWEP':
+        elif climate_type[:4] == 'W5E5':
             if y1 > 2019 or y0 < 1979:
                 text = 'The climate files only go from 1979 --2019, something is wrong'
         # if default settings: this is the last day in March or September
@@ -470,7 +485,7 @@ def process_w5e5_data(gdir, y0=None, y1=None, temporal_resol='daily',
         #  this was tested also for hydro_month = 1
         ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
                                '{}-{:02d}-{}'.format(y1, em, end_day)))
-        if sm == 1 and y1 == 2019 and (climate_type == 'W5E5' or climate_type == 'W5E5_MSWEP'):
+        if sm == 1 and y1 == 2019 and (climate_type[:4] == 'W5E5'):
             days_in_month = ds['time.daysinmonth'].copy()
         try:
             # computing all the distances and choose the nearest gridpoint
@@ -485,7 +500,7 @@ def process_w5e5_data(gdir, y0=None, y1=None, temporal_resol='daily',
         # standard deviation of daily temperature:
         Tvar = 'Tair'
         Pvar = 'tp'
-        if climate_type == 'W5E5' or climate_type == 'W5E5_MSWEP':
+        if climate_type[:4] == 'W5E5':
             Tvar = 'tas'
             Pvar = 'pr'
         if temporal_resol == 'monthly':
@@ -551,7 +566,7 @@ def process_w5e5_data(gdir, y0=None, y1=None, temporal_resol='daily',
         # the prcp data of wfde5_CRU  has been converted already into
         # kg m-2 day-1 ~ mm/day or into kg m-2 month-1 ~ mm/month
             prcp = ds[Pvar].data  # * 1000
-        elif climate_type == 'W5E5' or climate_type == 'W5E5_MSWEP':
+        elif climate_type[:4] == 'W5E5':
             # if daily convert kg m-2 s-1 into kg m-2 day-1
             # if monthly convert monthly sum of kg m-2 s-1 into kg m-2 month-1
             prcp = ds[Pvar].data * SEC_IN_DAY
@@ -612,7 +627,7 @@ def process_w5e5_data(gdir, y0=None, y1=None, temporal_resol='daily',
 
         # no flattening done for the ERA5dr gradient dataset
         ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
-        if sm==1 and y1 == 2019 and (climate_type == 'W5E5' or climate_type =='W5E5_MSWEP'):
+        if sm==1 and y1 == 2019 and (climate_type[:4] == 'W5E5'):
             # missing some months of ERA5dr (which only goes till middle of 2019)
             # otherwise it will fill it with large numbers ...
             ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm), '2018-{:02d}-01'.format(em)))
@@ -628,7 +643,7 @@ def process_w5e5_data(gdir, y0=None, y1=None, temporal_resol='daily',
             # gradient needs to be restructured to have values for each day
             # when wfde5_daily is applied
             # assume same gradient for each day
-            if sm == 1 and y1 == 2019 and (climate_type == 'W5E5' or climate_type == 'W5E5_MSWEP'):
+            if sm == 1 and y1 == 2019 and (climate_type[:4] == 'W5E5'):
                 gradient = np.repeat(gradient, days_in_month.resample(time='MS').mean())
                 assert len(gradient) == len(days_in_month)
             else:
