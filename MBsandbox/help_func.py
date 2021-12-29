@@ -178,6 +178,9 @@ def minimize_bias_geodetic_via_pf_fixed_melt_f(x, gd_mb=None, mb_geodetic=None,
     comparing modelled mean specific mass balance between 2000 and 2020 to
     observed geodetic data (from Hugonnet et al. 2021)
 
+    Important, here the free parameter that is tuned to match the geodetic estimates is the precipitation factor
+    (and not the melt_f) !!!
+
     Parameters
     ----------
     x : float
@@ -254,7 +257,10 @@ def optimize_std_quot_brentq_geod_via_melt_f(x, gd_mb=None, mb_geodetic=None,
 
     for each melt_f an optimal pf is found (by using the geodetic data via
     `minimize_bias_geodetic_via_pf_fixed_melt_f`), then (1 - standard deviation quotient between modelled and
-    reference mass balance) is computed, which is then minimised
+    reference mass balance) is computed, which is then minimised.
+
+    Important, here the free parameter that is tuned to match the geodetic estimates is the precipitation factor
+    (and not the melt_f) !!!
 
     Parameters
     ----------
