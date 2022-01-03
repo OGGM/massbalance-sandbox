@@ -920,6 +920,213 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
                                    climate_historical_filesuffix=climate_historical_filesuffix,
                                    **kwargs)
 
+@entity_task(log, writes=['gcm_data'])
+def process_isimip_data_no_corr(gdir, output_filesuffix='', fpath_temp=None,
+                        fpath_temp_std=None,
+                        fpath_precip=None,
+                        climate_historical_filesuffix='',
+                        ensemble='mri-esm2-0_r1i1p1f1',
+                        # from temperature tie series the "median" ensemble
+                        ssp='ssp126', flat=True,
+                        temporal_resol='monthly',
+                        cluster=False,
+                        year_range=('1979', '2014'), correct = False,
+                        **kwargs):
+    """Read, process and store the isimip climate data for this glacier.
+
+    It stores the data in a format that can be used by the OGGM mass balance
+    model and in the glacier directory.
+
+    Currently, this function is built for the ISIMIP3b
+    simulations that are on the OGGM servers.
+
+    Parameters
+    ----------
+    filesuffix : str
+        append a suffix to the filename (useful for ensemble experiments).
+    fpath_temp : str
+        path to the temp file (default: cfg.PATHS['isimip3b_temp_file'])
+    fpath_precip : str
+        path to the precip file (default: cfg.PATHS['isimip3b_precip_file'])
+    climate_historical_filesuffix : str
+        filesuffix of historical climate dataset that should be used to
+        apply the anomaly method
+    **kwargs: any kwarg to be passed to ref:`process_gcm_data`
+    """
+    if correct != False:
+        raise InvalidWorkflowError('for processing isimip data with correction'
+                                  'please use process_isimip_data function')
+
+    if output_filesuffix == '':
+        # recognize the gcm climate file for later
+        if temporal_resol == 'monthly':
+            output_filesuffix = '_monthly_ISIMIP3b_{}_{}'.format(ensemble, ssp)
+        elif temporal_resol == 'daily':
+            output_filesuffix = '_daily_ISIMIP3b_{}_{}'.format(ensemble, ssp)
+
+    if temporal_resol == 'monthly':
+        assert 'monthly' in climate_historical_filesuffix
+    elif temporal_resol == 'daily':
+        assert 'daily' in climate_historical_filesuffix
+    # Get the path of GCM temperature & precipitation data
+    # if fpath_temp is None:
+    #    if not ('cmip5_temp_file' in cfg.PATHS):
+    #       raise ValueError("Need to set cfg.PATHS['isimip3b_temp_file']")
+    #    fpath_temp = cfg.PATHS['isimip3b_temp_file']
+    # if fpath_precip is None:
+    #    if not ('cmip5_precip_file' in cfg.PATHS):
+    #        raise ValueError("Need to set cfg.PATHS['isimip3b_precip_file']")
+    #    fpath_precip = cfg.PATHS['isimip3b_precip_file']
+
+    # Glacier location
+    glon = gdir.cenlon
+    glat = gdir.cenlat
+    if None in [fpath_temp, fpath_temp_std,
+                fpath_precip]:
+        if temporal_resol == 'monthly':
+            if cluster:
+                path = '/home/www/lschuster/isimip3b_flat/flat/monthly/'
+            else:
+                path = 'https://cluster.klima.uni-bremen.de/~lschuster/isimip3b_flat/flat/monthly/'
+            add = '_global_monthly_flat_glaciers.nc'
+        elif temporal_resol == 'daily':
+            if climate_historical_filesuffix == "_daily_W5E5_dw":
+                path = 'https://cluster.klima.uni-bremen.de/~shanus/ISIMIP3b/flattened/daily/'
+                add = '_global_daily_flat_glaciers_2015_2100.nc'
+            else:
+                if cluster:
+                    path = '/home/www/lschuster/isimip3b_flat/flat/daily/'
+                else:
+                    path = 'https://cluster.klima.uni-bremen.de/~lschuster/isimip3b_flat/flat/daily/'
+                add = '_global_daily_flat_glaciers.nc'
+
+        fpath_spec = path + '{}_w5e5_'.format(ensemble) + '{ssp}_{var}' + add
+        fpath_temp = fpath_spec.format(var='tasAdjust', ssp=ssp)
+
+        if temporal_resol == 'monthly':
+            fpath_temp_std = fpath_spec.format(var='tasAdjust_std', ssp=ssp)
+
+        fpath_precip = fpath_spec.format(var='prAdjust', ssp=ssp)
+        if not cluster:
+            fpath_temp = utils.file_downloader(fpath_temp)
+            if temporal_resol == 'monthly':
+                fpath_temp_std = utils.file_downloader(fpath_temp_std)
+
+            fpath_precip = utils.file_downloader(fpath_precip)
+
+    with xr.open_dataset(fpath_temp, use_cftime=True) as tempds_gcm:
+
+        # Check longitude conventions
+        if tempds_gcm.longitude.min() >= 0 and glon <= 0:
+            glon += 360
+        #assert tempds_gcm.attrs['experiment'] == ssp
+        # Take the closest to the glacier
+        # Should we consider GCM interpolation?
+        # try:
+        # computing all the distances and choose the nearest gridpoint
+        c = (tempds_gcm.longitude - glon) ** 2 + (
+                    tempds_gcm.latitude - glat) ** 2
+        # first select gridpoint, then merge, should be faster!!!
+        temp_a = tempds_gcm.isel(points=c.argmin())
+        # merge historical with gcm together
+        # TODO: change to drop_conflicts when xarray version v0.17.0 can
+        # be used with salem
+        temp = temp_a.tas
+        temp['lon'] = temp_a.longitude
+        temp['lat'] = temp_a.latitude
+        # except ValueError:
+        #    temp = tempds.tasAdjust.sel(latitude=glat, longitude=glon,
+        #                                method='nearest')
+        temp.lon.values = temp.lon if temp.lon <= 180 else temp.lon - 360
+        # tempds.close()
+
+    with xr.open_dataset(fpath_precip, use_cftime=True) as precipds_gcm:
+
+        if temporal_resol == 'monthly':
+            tempds_std = xr.open_dataset(fpath_temp_std,
+                                             use_cftime=True)
+            try:
+                c = (tempds_std.longitude - glon) ** 2 + \
+                    (tempds_std.latitude - glat) ** 2
+                temp_std_a = tempds_std.isel(points=c.argmin())
+                temp_std = temp_std_a.tasAdjust_std
+                temp_std['lon'] = temp_std_a.longitude
+                temp_std['lat'] = temp_std_a.latitude
+            except ValueError:
+                temp_std = tempds_std.tasAdjust_std.sel(latitude=glat,
+                                                        longitude=glon,
+                                                        method='nearest')
+            temp_std.lon.values = temp_std.lon if temp_std.lon <= 180 \
+                else temp.lon - 360
+
+        # precipds = xr.merge([precipds_gcm, precipds_hist],
+        #                    combine_attrs='override')
+        # try:
+        c = (precipds_gcm.longitude - glon) ** 2 + (
+                    precipds_gcm.latitude - glat) ** 2
+        precip_a = precipds_gcm.isel(points=c.argmin())
+
+        if temporal_resol == 'monthly':
+            precip = precip_a.prAdjust
+        elif temporal_resol == 'daily':
+            precip = precip_a.pr
+        precip['lon'] = precip_a.longitude
+        precip['lat'] = precip_a.latitude
+        # except ValueError:
+        #    precip = precipds.prAdjust.sel(latitude=glat,
+        #                                    longitude=glon, method='nearest')
+        # precipds.close()
+        # Back to [-180, 180] for OGGM
+        precip.lon.values = precip.lon if precip.lon <= 180 \
+            else precip.lon - 360
+
+        # Convert kg m-2 s-1 to mm mth-1 => 1 kg m-2 = 1 mm !!!
+
+        if temporal_resol == 'monthly':
+            assert 'kg m-2 s-1' in precip.units, \
+                'Precip units not understood'
+            ny, r = divmod(len(temp), 12)
+            assert r == 0
+            dimo = [cfg.DAYS_IN_MONTH[m - 1] for m in temp['time.month']]
+            precip = precip * dimo * (60 * 60 * 24)
+            tempds_std_gcm.close()
+
+        elif temporal_resol == 'daily':
+            # we want here to have daily precipitation: mm/day
+            # check if it is really daily: amount of days should be either
+            # 365 or 366
+            aod = temp.groupby('time.year').count()
+            assert np.all(aod[aod != 365] == 366)
+            # for daily: precip is already converted to mm/day during flattening
+            # check this
+            # assert 'mm/day' in precip.units
+            # if 'kg m-2 s-1' in precip.units:
+            #     precip = precip * (60*60*24)
+            precip = precip * (60 * 60 * 24)
+        # print(len(precip)
+
+    if temporal_resol == 'monthly':
+        process_gcm_data_adv_monthly(gdir,
+                                     output_filesuffix=output_filesuffix,
+                                     prcp=precip, temp=temp,
+                                     temp_std=temp_std,
+                                     source=output_filesuffix,
+                                     year_range=year_range,
+                                     climate_historical_filesuffix=climate_historical_filesuffix,
+                                     correct = correct,
+                                     **kwargs)
+    elif temporal_resol == 'daily':
+        print("process gcm files")
+        process_gcm_data_adv_daily(gdir,
+                                   output_filesuffix=output_filesuffix,
+                                   prcp=precip, temp=temp,
+                                   source=output_filesuffix,
+                                   year_range=year_range,
+                                   climate_historical_filesuffix=climate_historical_filesuffix,
+                                   correct = correct,
+                                   **kwargs)
+
+
 
 @entity_task(log)
 def bayes_mbcalibration(gd, mb_type='mb_monthly', cores=4,
