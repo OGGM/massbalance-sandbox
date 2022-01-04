@@ -990,6 +990,65 @@ class Test_geodetic_hydro1:
         assert_allclose(melt_fs[0], melt_fs[1], rtol= 0.2)
         assert_allclose(melt_fs[0], melt_fs[2], rtol= 0.2)
 
+    def test_minimize_geodetic_via_temp_bias(self, gdir):
+        from MBsandbox.help_func import (minimize_bias_geodetic_via_temp_bias)
+        cfg.PARAMS['hydro_month_nh'] = 1
+
+        grad_type = 'cte'
+        N = 100
+        # get the geodetic calibration data
+        url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
+        path_geodetic = utils.file_downloader(url)
+        pd_geodetic_all = pd.read_csv(path_geodetic, index_col='rgiid')
+        pd_geodetic = pd_geodetic_all.loc[pd_geodetic_all.period == '2000-01-01_2020-01-01']
+        mb_geodetic = pd_geodetic.loc[gdir.rgi_id].dmdtda * 1000
+
+        melt_f_opt_ref, pf_opt_ref = (160, 2.7) # just approximate values from the optimal ref
+        for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_real_daily']:
+
+            for climate_type in ['W5E5']:
+
+                if mb_type != 'mb_real_daily':
+                    temporal_resol = 'monthly'
+                    process_w5e5_data(gdir, climate_type=climate_type,
+                                      temporal_resol=temporal_resol)
+                    input_fs = '_monthly_W5E5'
+                else:
+                    # because of get_climate_info need ERA5_daily as
+                    # baseline_climate until WFDE5_daily is included in
+                    # get_climate_info
+                    # cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
+                    temporal_resol='daily'
+                    process_w5e5_data(gdir, climate_type=climate_type,
+                                      temporal_resol=temporal_resol)
+                    input_fs = '_daily_W5E5'
+
+                hgts, widths = gdir.get_inversion_flowline_hw()
+                fs = '_{}_{}'.format(temporal_resol, climate_type)
+                mbdf = gdir.get_ref_mb_data(input_filesuffix=fs)
+                ys_glac = mbdf.index.values
+                gd_mb = TIModel(gdir, None, prcp_fac=1,
+                                mb_type=mb_type,
+                                grad_type=grad_type,
+                                N=N, baseline_climate=climate_type)
+
+                temp_bias = scipy.optimize.brentq(minimize_bias_geodetic_via_temp_bias, -3, 3,
+                                                      disp=True, xtol=0.01,
+                                                      args=(gd_mb, mb_geodetic,
+                                                            hgts, widths,
+                                                            melt_f_opt_ref, pf_opt_ref))
+                gd_mb.temp_bias = temp_bias
+                gd_mb.prcp_fac = pf_opt_ref
+                gd_mb.melt_f = melt_f_opt_ref
+
+                mb_specific = gd_mb.get_specific_mb(heights=hgts, widths=widths,
+                                                    year=np.arange(2000, 2020, 1))
+
+                bias = mb_specific.mean() - mb_geodetic
+                # check if the bias is optimised
+                assert bias.round() == 0
+
+
     def test_daily_monthly_annual_specific_mb(self, gdir):
         # this does not work because of different days of years at the moment!!!
         # for both ERA5 and WFDE5
