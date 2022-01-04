@@ -51,6 +51,7 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
                                   mb_model_sub_class=TIModel,
                                   kwargs_for_TIModel_Sfc_Type={},
                                   reset=True,
+                                  no_qc=False,
                                   **kwargs):
     """ Runs a glacier with climate input from e.g. W5E5 or a GCM.
 
@@ -125,6 +126,9 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
     precipitation_factor: float
         multiply a factor to the precipitation time series
         use the value from the calibration!
+    no_qc : boolean
+        default is False (so qc is done if melt_f comes not from json).
+        but can be set to True if no quality check is wanted when melt_f is set directly!
     kwargs : dict
         kwargs to pass to the FluxBasedModel instance
     """
@@ -215,8 +219,9 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
             np.testing.assert_allclose(ref_hgt_calib_diff,
                             mb.flowline_mb_models[-1].ref_hgt - mb.flowline_mb_models[-1].uncorrected_ref_hgt)
     else:
-        # do the quality check!
-        mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
+        if not no_qc:
+            # do the quality check!
+            mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
 
     if ye is None:
         # Decide from climate (we can run the last year with data as well)
@@ -258,6 +263,7 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                                zero_initial_glacier=False,
                                unique_samples=False, #melt_f_file=None,
                                reset = True,
+                               no_qc=False,
                                kwargs_for_TIModel_Sfc_Type={},
                                **kwargs):
 
@@ -332,6 +338,9 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         per random climate period-length
         if false, every model year will be chosen from the random climate
         period with the same probability
+    no_qc : boolean
+        default is False (so qc is done if melt_f comes not from json).
+        but can be set to True if no quality check is wanted when melt_f is set directly!
     kwargs : dict
         kwargs to pass to the FluxBasedModel instance
     """
@@ -384,8 +393,9 @@ def run_random_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         np.testing.assert_allclose(ref_hgt_calib_diff,
                         mb.flowline_mb_models[-1].mbmod.ref_hgt - mb.flowline_mb_models[-1].mbmod.uncorrected_ref_hgt)
     else:
-        # do the quality check!
-        mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
+        if not no_qc:
+            # do the quality check!
+            mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
 
     if init_model_fls is None:
         fls = gdir.read_pickle('model_flowlines')
@@ -436,6 +446,7 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                                  reset = True,
                                  interpolation_optim=False,
                                  use_avg_climate=False,
+                                 no_qc=False,
                                  **kwargs):
     """Runs the constant mass-balance model of the TIModel
      for a given number of years.
@@ -508,6 +519,9 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
         to change these params: melt_f_ratio_snow_to_ice, melt_f_update, spinup_yrs,
         tau_e_fold_yr, melt_f_change; if mb_model_sub_class is TIModel, this should be
         an empty dict!
+    no_qc : boolean
+        default is False (so qc is done if melt_f comes not from json).
+        but can be set to True if no quality check is wanted when melt_f is set directly!
     kwargs : dict
         kwargs to pass to the FluxBasedModel instance
     """
@@ -576,8 +590,9 @@ def run_constant_climate_TIModel(gdir, nyears=1000, y0=None, halfsize=15,
                                    mb.flowline_mb_models[-1].mbmod.ref_hgt - mb.flowline_mb_models[
                                        -1].mbmod.uncorrected_ref_hgt)
     else:
-        # do the quality check!
-        mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
+        if not no_qc:
+            # do the quality check!
+            mb.flowline_mb_models[-1].historical_climate_qc_mod(gdir)
 
     if init_model_fls is None:
         fls = gdir.read_pickle('model_flowlines')
