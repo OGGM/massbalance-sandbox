@@ -95,10 +95,11 @@ def minimize_bias(x, gd_mb=None, gdir_min=None,
 
     return bias_calib
 # %%
+
 def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
                            h=None, w=None, pf=2.5,
                            absolute_bias=False,
-                           ys=np.arange(2000, 2019, 1),
+                           ys=np.arange(2000, 2020, 1),
                            oggm_default_mb=False,
                            spinup=True):
     """ calibrates the melt factor (melt_f) by getting the bias to zero
@@ -167,6 +168,227 @@ def minimize_bias_geodetic(x, gd_mb=None, mb_geodetic=None,
 
     return bias_calib
 
+def minimize_bias_geodetic_via_pf_fixed_melt_f(x, gd_mb=None, mb_geodetic=None,
+                           h=None, w=None, melt_f=None,
+                           absolute_bias=False,
+                           ys=np.arange(2000, 2020, 1),
+                           oggm_default_mb=False,
+                           spinup=True):
+    """ calibrates the precipitation factor (pf) by getting the bias to zero
+    comparing modelled mean specific mass balance between 2000 and 2020 to
+    observed geodetic data (from Hugonnet et al. 2021)
+
+    Important, here the free parameter that is tuned to match the geodetic estimates is the precipitation factor
+    (and not the melt_f) !!!
+
+    Parameters
+    ----------
+    x : float
+        what is optimised (here the precipitation factor pf)
+    gd_mb: class instance
+        instantiated class of TIModel, this is updated with the prescribed pf (& melt_f)
+    mb_geodetic: float
+         geodetic mass balance between 2000-2020 of the instantiated glacier
+    h: np.array
+        heights of the instantiated glacier
+    w: np.array
+        widths of the instantiated glacier
+    melt_f: float
+        melt factor
+        has to be set!!!
+    absolute_bias : bool
+        if absolute_bias == True, the absolute value of the bias is returned.
+        if optimisation is done with Powell need absolute bias.
+        If optimisation is done with Brentq, absolute_bias has to be set False
+        The default is False.
+    ys: np.array
+        years for which specific mass balance is computed
+        default is 2000--2019 (when using W5E5)
+    oggm_default_mb : bool
+        if default oggm mass balance should be used (default is False)
+    spinup : bool
+        send to get_specific_mb (for sfc type distinction)
+
+    Returns
+    -------
+    float
+        bias: modeled mass balance mean - reference mean (geodetic)
+        if absolute_bias = True:  np.abs(bias) is returned
+
+    """
+    # not sure if this works for the oggm default PastMassBalance instance, probably not:
+    gd_mb.prcp_fac = x
+
+    if oggm_default_mb:
+        gd_mb.mu_star = melt_f
+    else:
+        gd_mb.melt_f = melt_f
+
+
+    try:
+        mb_specific = gd_mb.get_specific_mb(heights=h,
+                                            widths=w,
+                                            year=ys,
+                                            spinup=spinup
+                                            ).mean()
+    except:
+        mb_specific = gd_mb.get_specific_mb(heights=h,
+                                        widths=w,
+                                        year=ys
+                                        ).mean()
+
+    if absolute_bias:
+        bias_calib = np.abs(np.mean(mb_specific -
+                                    mb_geodetic))
+    else:
+        bias_calib = np.mean(mb_specific - mb_geodetic)
+
+    return bias_calib
+
+
+def minimize_bias_geodetic_via_temp_bias(x, gd_mb=None, mb_geodetic=None,
+                           h=None, w=None, melt_f=None, pf=None,
+                           absolute_bias=False,
+                           ys=np.arange(2000, 2020, 1),
+                           oggm_default_mb=False,
+                           spinup=True):
+    """ calibrates the temperature bias (t_bias) by getting the bias (|observed-geodetic|) to zero
+    comparing modelled mean specific mass balance between 2000 and 2020 to
+    observed geodetic data (from Hugonnet et al. 2021)
+
+    Important, here the free parameter that is tuned to match the geodetic estimates is the temperature bias
+    (and not the melt_f and also not pf). Hence, both melt_f and pf have to be prescribed !!!
+
+    Parameters
+    ----------
+    x : float
+        what is optimised (here the temperature bias)
+    gd_mb: class instance
+        instantiated class of TIModel, this is updated with the prescribed pf & melt_f
+    mb_geodetic: float
+         geodetic mass balance between 2000-2020 of the instantiated glacier
+    h: np.array
+        heights of the instantiated glacier
+    w: np.array
+        widths of the instantiated glacier
+    melt_f: float
+        melt factor
+        has to be set!!!
+    pf : float
+        precipitation factor
+        has to be set!!!
+    absolute_bias : bool
+        if absolute_bias == True, the absolute value of the bias is returned.
+        if optimisation is done with Powell need absolute bias.
+        If optimisation is done with Brentq, absolute_bias has to be set False
+        The default is False.
+    ys: np.array
+        years for which specific mass balance is computed
+        default is 2000--2019 (when using W5E5)
+    oggm_default_mb : bool
+        if default oggm mass balance should be used (default is False)
+    spinup : bool
+        send to get_specific_mb (for sfc type distinction)
+
+    Returns
+    -------
+    float
+        bias: modeled mass balance mean - reference mean (geodetic)
+        if absolute_bias = True:  np.abs(bias) is returned
+
+    """
+    # not sure if this works for the oggm default PastMassBalance instance, probably not:
+    gd_mb.temp_bias = x
+
+    gd_mb.prcp_fac = pf
+
+    if oggm_default_mb:
+        gd_mb.mu_star = melt_f
+    else:
+        gd_mb.melt_f = melt_f
+
+
+    try:
+        mb_specific = gd_mb.get_specific_mb(heights=h,
+                                            widths=w,
+                                            year=ys,
+                                            spinup=spinup
+                                            ).mean()
+    except:
+        mb_specific = gd_mb.get_specific_mb(heights=h,
+                                        widths=w,
+                                        year=ys
+                                        ).mean()
+
+    if absolute_bias:
+        bias_calib = np.abs(np.mean(mb_specific -
+                                    mb_geodetic))
+    else:
+        bias_calib = np.mean(mb_specific - mb_geodetic)
+
+    return bias_calib
+
+
+def optimize_std_quot_brentq_geod_via_melt_f(x, gd_mb=None, mb_geodetic=None,
+                                  mb_glaciological=None,
+                                  h=None, w=None,
+                                  ys_glac=np.arange(1979, 2020, 1),
+                                  ):
+    """ calibrates the optimal melt factor (melt_f) by correcting the
+    standard deviation of the modelled mass balance by using the standard deviation
+    from the direct glaciological measurements as reference
+
+    for each melt_f an optimal pf is found (by using the geodetic data via
+    `minimize_bias_geodetic_via_pf_fixed_melt_f`), then (1 - standard deviation quotient between modelled and
+    reference mass balance) is computed, which is then minimised.
+
+    Important, here the free parameter that is tuned to match the geodetic estimates is the precipitation factor
+    (and not the melt_f) !!!
+
+    Parameters
+    ----------
+    x : float
+        what is optimised (here the melt_f)
+    gd_mb : class instance
+        instantiated class of TIModel, this is updated by pf and melt_f
+    mb_geodetic: float
+        geodetic mass balance between 2000-2020 of the instantiated glacier
+    mb_glaciological : pandas.core.series.Series
+        direct glaciological timeseries
+        e.g. gdir.get_ref_mb_data(input_filesuffix='_{}_{}'.format(temporal_resol, climate_type))['ANNUAL_BALANCE']
+    h: np.array
+        heights of the instantiated glacier
+    w: np.array
+        widths of the instantiated glacier
+    ys_glac : np.array
+        array of years where both, glaciological observations and climate data are available
+        (just use the years from the ref_mb_data file)
+
+    Returns
+    -------
+    float
+        1- quot_std
+
+    """
+
+    melt_f = x
+    # compute optimal pf according to geodetic data
+    pf_opt = scipy.optimize.brentq(minimize_bias_geodetic_via_pf_fixed_melt_f, 0.01, 20,  # pf range
+                                       xtol=0.1,
+                                       args=(gd_mb, mb_geodetic, h, w, melt_f),
+                                       disp=True)
+
+    gd_mb.prcp_fac = pf_opt
+    gd_mb.melt_f = melt_f
+    # now compute std over this time period using
+    # direct glaciological observations
+    mod_std = gd_mb.get_specific_mb(heights=h, widths=w,
+                                    year=ys_glac).std()
+    ref_std = mb_glaciological.loc[ys_glac].values.std()
+    quot_std = mod_std / ref_std
+
+    return 1 - quot_std
+
 
 def optimize_std_quot_brentq_geod(x, gd_mb=None, mb_geodetic=None,
                                   mb_glaciological=None,
@@ -224,6 +446,7 @@ def optimize_std_quot_brentq_geod(x, gd_mb=None, mb_geodetic=None,
     quot_std = mod_std / ref_std
 
     return 1 - quot_std
+
 
 def compute_stat(mb_specific=None, mbdf=None, return_dict=False,
                  return_plot=False, round = False):
