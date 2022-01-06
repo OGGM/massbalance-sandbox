@@ -1031,7 +1031,8 @@ def process_isimip_data_no_corr(gdir, output_filesuffix='', fpath_temp=None,
         # merge historical with gcm together
         # TODO: change to drop_conflicts when xarray version v0.17.0 can
         # be used with salem
-        temp = temp_a.tas
+        # it should take the first variable of the dataset
+        temp = temp_a[list(temp_a.keys())[0]]
         temp['lon'] = temp_a.longitude
         temp['lat'] = temp_a.latitude
         # except ValueError:
@@ -1066,10 +1067,8 @@ def process_isimip_data_no_corr(gdir, output_filesuffix='', fpath_temp=None,
                     precipds_gcm.latitude - glat) ** 2
         precip_a = precipds_gcm.isel(points=c.argmin())
 
-        if temporal_resol == 'monthly':
-            precip = precip_a.prAdjust
-        elif temporal_resol == 'daily':
-            precip = precip_a.pr
+        # it should just take the first variable in the given data set, so it can be used with different datasets
+        precip = precip_a[list(precip_a.keys())[0]]
         precip['lon'] = precip_a.longitude
         precip['lat'] = precip_a.latitude
         # except ValueError:
@@ -1089,7 +1088,7 @@ def process_isimip_data_no_corr(gdir, output_filesuffix='', fpath_temp=None,
             assert r == 0
             dimo = [cfg.DAYS_IN_MONTH[m - 1] for m in temp['time.month']]
             precip = precip * dimo * (60 * 60 * 24)
-            tempds_std_gcm.close()
+            tempds_std.close()
 
         elif temporal_resol == 'daily':
             # we want here to have daily precipitation: mm/day
@@ -1100,10 +1099,10 @@ def process_isimip_data_no_corr(gdir, output_filesuffix='', fpath_temp=None,
             # for daily: precip is already converted to mm/day during flattening
             # check this
             # assert 'mm/day' in precip.units
-            # if 'kg m-2 s-1' in precip.units:
-            #     precip = precip * (60*60*24)
-            precip = precip * (60 * 60 * 24)
-        # print(len(precip)
+            if 'kg m-2 s-1' in precip.units:
+                precip = precip * (60*60*24)
+            else:
+                assert 'mm/day' in precip.units
 
     if temporal_resol == 'monthly':
         process_gcm_data_adv_monthly(gdir,
@@ -1116,7 +1115,6 @@ def process_isimip_data_no_corr(gdir, output_filesuffix='', fpath_temp=None,
                                      correct = correct,
                                      **kwargs)
     elif temporal_resol == 'daily':
-        print("process gcm files")
         process_gcm_data_adv_daily(gdir,
                                    output_filesuffix=output_filesuffix,
                                    prcp=precip, temp=temp,
