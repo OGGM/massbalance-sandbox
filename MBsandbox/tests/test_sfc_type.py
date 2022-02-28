@@ -46,10 +46,11 @@ class Test_sfc_type_run:
         # get the climate data (either w5e5 or WFDE5_CRU)
         workflow.execute_entity_task(process_w5e5_data, gdirs,
                                      temporal_resol=temporal_resol, climate_type=climate_type)
-        workflow.execute_entity_task(process_isimip_data, gdirs, ensemble=ensemble,
+        process_isimip_data(gdir, ensemble=ensemble,
                                      ssp=ssp, temporal_resol=temporal_resol,
                                      climate_historical_filesuffix='_{}_{}'.format(temporal_resol,
-                                                                                   dataset));
+                                                                                   dataset)
+                            )
 
         nyears = 10
 
@@ -167,10 +168,10 @@ class Test_sfc_type_run:
                            run_type='random',
                            unique_samples=True)
         ds_random_ratio1_a_fb, melt_f_random_ratio1_a_fb, run_model_random_ratio1_a_fb = out
-        out_2 = calib_inv_run(gdir=gdirs[-1], mb_model_sub_class = TIModel,
-                              mb_elev_feedback = 'annual',
-                              nyears=nyears,mb_type=mb_type, grad_type=grad_type, pf=pf,
-                                     run_type = 'random', hs=1, unique_samples=True)
+        out_2 = calib_inv_run(gdir=gdirs[-1], mb_model_sub_class=TIModel,
+                              mb_elev_feedback='annual',
+                              nyears=nyears, mb_type=mb_type, grad_type=grad_type, pf=pf,
+                              run_type='random', hs=1, unique_samples=True)
         ds_default_random_a_fb, melt_f_default_random_a_fb, run_model_random_a_fb = out_2
         np.testing.assert_allclose(ds_random_ratio1_a_fb.volume, ds_default_random_a_fb.volume)
 
@@ -278,8 +279,8 @@ class Test_sfc_type_run:
                                                                      2003-5+5+1))
         # now compute it again, we should not get exactly the same output,
         # because of changes in the buckets ?!
-        for n in np.arange(0,20):
-            mb20 = mb_mod.get_annual_mb(h, year = 2000)
+        for n in np.arange(0, 20):
+            mb20 = mb_mod.get_annual_mb(h, year=2000)
         pd_bucket20 = mb_mod.mbmod.pd_bucket.copy()
         # ok, apparently the mass balances are the same
         np.testing.assert_allclose(mb, mb20)
