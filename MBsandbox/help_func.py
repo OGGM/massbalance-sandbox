@@ -11,10 +11,11 @@ compute performance statistics
 import scipy
 import matplotlib.pyplot as plt
 import numpy as np
-from oggm.core import climate
+from sklearn.metrics import mean_absolute_error
 import pandas as pd
 import logging
-from oggm import utils, workflow, tasks, entity_task
+from oggm.core import climate
+from oggm import utils, workflow, tasks, entity_task, cfg
 from oggm.exceptions import MassBalanceCalibrationError
 
 log = logging.getLogger(__name__)
@@ -24,9 +25,6 @@ from MBsandbox.mbmod_daily_oneflowline import TIModel, TIModel_Sfc_Type
 # from MBsandbox.help_func import compute_stat, minimize_bias, optimize_std_quot_brentq
 from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel, run_constant_climate_TIModel,
                                         run_random_climate_TIModel)
-
-
-from oggm import cfg
 
 
 # necessary for `melt_f_calib_geod_prep_inversion`
@@ -779,6 +777,8 @@ def optimize_std_quot_brentq_via_temp_b_w_min_winter_geod_bias(x, gd_mb=None,
 
     gd_mb.melt_f = melt_f_opt
     gd_mb.temp_bias = temp_bias
+
+
     # now compute std over this time period using
     # direct glaciological observations
     mod_std = gd_mb.get_specific_mb(heights=h, widths=w,
@@ -966,11 +966,13 @@ def calibrate_to_geodetic_bias_winter_mb(gdir,  # temp_b_range = np.arange(-3,3,
                                              args=(gd_mb_sfc, mb_geodetic, hgts, widths, pf_opt),
                                              disp=True)
 
-    # first precompute it (like that also years in between (without observations) are estimated)
+    # first precompute it for the entire time period
+    # more practical also for std and MB profile computation
+    # (like that also years in between (without observations) are estimated)
     # [only important for TIModel_Sfc_Type, if observations have missing years in between]
     gd_mb_sfc.get_specific_mb(heights=hgts, widths=widths,
-                              year=np.arange(yrs_seasonal_mbs[0],
-                                             yrs_seasonal_mbs[-1] + 1, 1))
+                              year=np.arange(1979, # yrs_seasonal_mbs[0]
+                                             2019 + 1, 1))
     # in case of HEF this should be the same !!! (as HEF always has WGMS seasonal MB from Oct 1st to April 30th)
     outi_right_period = gd_mb_sfc.get_specific_winter_mb(heights=hgts, year=yrs_seasonal_mbs, widths=widths,
                                                          add_climate=True,
@@ -1006,14 +1008,43 @@ def calibrate_to_geodetic_bias_winter_mb(gdir,  # temp_b_range = np.arange(-3,3,
     melt_w_month_kg_m2_2d = pd_tfm * fact * gd_mb_sfc.melt_f_buckets[0]
     specific_melt_winter = np.average(melt_w_month_kg_m2_2d.mean(axis=1), weights=widths)
 
+    # also compute quot_std
     mod_std = gd_mb_sfc.get_specific_mb(heights=hgts, widths=widths,
                                         year=ys_glac).std()
     ref_std = mb_glaciological.loc[ys_glac].values.std()
     quot_std = mod_std / ref_std
 
-    return (gd_mb_sfc.pf_opt, gd_mb_sfc.melt_f, winter_prcp_mean, winter_solid_prcp_mean,
-            specific_melt_winter, except_necessary, quot_std)
+    # now also compute mean absolute error of mean MB profile: (if available!)
+    # observed MB profile
+    # todo: optimize this that this is not called every time but just once!
+    outi = get_mean_mb_profile_filtered(gdir, input_fs=input_fs, obs_ratio_needed=0.6)
+    if outi is None:
+        # no MB profile exist -> mae has to be np.NaN
+        mae = np.NaN
+    else:
+        obs_mean_mb_profile_filtered, obs_mean_mb_profile_years = outi
+        # get modelled MB profile
+        fac = cfg.SEC_IN_YEAR * cfg.PARAMS['ice_density']
+        mb_annual = []
+        gd_mb_sfc.reset_pd_mb_bucket()
+        for y in obs_mean_mb_profile_years:
+            # if isinstance(gd_mb, TIModel):
+            mb_y = gd_mb_sfc.get_annual_mb(hgts, y) * fac
+            # print(h, mb_y)
+            # else:
+            #   mb_y = gd_mb.pd_mb_annual[y]
+            mb_annual.append(mb_y)
+        y_modelled = np.array(mb_annual).mean(axis=0)
+        h_condi = obs_mean_mb_profile_filtered.index
+        condi1 = ((hgts > min(h_condi)) & (hgts < max(h_condi)))
+        f = scipy.interpolate.interp1d(h_condi,
+                                       obs_mean_mb_profile_filtered.values,
+                                       kind='cubic')
+        y_interp_obs = f(hgts[condi1])
+        mae = mean_absolute_error(y_interp_obs, y_modelled[condi1])
 
+    return (gd_mb_sfc.pf_opt, gd_mb_sfc.melt_f, winter_prcp_mean, winter_solid_prcp_mean,
+            specific_melt_winter, except_necessary, quot_std, mae)
 
 @entity_task(log)
 def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte',
