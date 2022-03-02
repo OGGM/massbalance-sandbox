@@ -31,7 +31,6 @@ import warnings
 # from drounce_analyze_mcmc import effective_n, mcse_batchmeans
 # plotting bayesian stuff
 import arviz as az
-
 az.rcParams['stats.hdi_prob'] = 0.95
 
 # import the MSsandbox modules
@@ -1143,7 +1142,7 @@ def bayes_mbcalibration(gd, mb_type='mb_monthly', cores=4,
     # at instantiation use prcp_fac = 2.5, change this in def_get_mb later on
     gd_mb = TIModel(gd, 150, mb_type=mb_type, N=100, prcp_fac=2.5,
                     grad_type=grad_type, baseline_climate=dataset)
-    gd_mb.historical_climate_qc_mod(gd)
+    #gd_mb.historical_climate_qc_mod(gd)
 
     with pm.Model() as model_new:
         pf = pm.TruncatedNormal('pf',

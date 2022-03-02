@@ -309,7 +309,7 @@ class Test_process_era5_daily_wfde5_w5e5_hef:
         assert xr_nc_monthly_W5E5.prcp.max() > 1
         # to be sure that there are no erroneous filling values inside
         assert np.all(xr_nc_monthly.prcp) < 10000
-        assert np.all(xr_nc_monthly_W5E5) < 10000
+        assert np.all(xr_nc_monthly_W5E5.prcp) < 10000
         # temperature values are in °C and in the right range
         assert np.all(xr_nc_monthly.temp) > -100
         assert np.all(xr_nc_monthly.temp) < 100
@@ -454,10 +454,13 @@ class Test_process_era5_daily_wfde5_w5e5_hef:
 
     # this could be replaced in OGGM base code test_shop.py when merged
     #@pytest.mark.parametrize('hydro_month', [10, 1])
+    @pytest.mark.skip(reason="too slow")
     def test_all_at_once(self, gdir):
         # Init
         cfg.PARAMS['hydro_month_nh'] = 1
-        exps = ['CRU', 'HISTALP', 'ERA5', 'ERA5L', 'CERA',
+        exps = ['CRU',
+                'ERA5',
+                #'CERA', HISTALP', 'ERA5L',
                 'ERA5_daily', 'WFDE5_CRU_daily', 'W5E5_daily',
                 'W5E5_MSWEP_daily', 'WFDE5_CRU_monthly',
                 'W5E5_monthly', 'W5E5_MSWEP_monthly']
@@ -478,7 +481,7 @@ class Test_process_era5_daily_wfde5_w5e5_hef:
                 fs = base
             elif base == 'WFDE5_CRU_daily' or base == 'W5E5_daily' or base == 'W5E5_MSWEP_daily':
                 process_w5e5_data(gdir, climate_type=base[:-6],
-                                   temporal_resol='daily')
+                                  temporal_resol='daily')
                 fs = f'_daily_{base[:-6]}'
             elif '_monthly' in base:
                 # wfde5_cru and w5e5

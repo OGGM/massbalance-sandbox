@@ -34,14 +34,16 @@ from MBsandbox.wip.help_func_geodetic import minimize_bias_geodetic
 # imports from MBsandbox package modules
 from MBsandbox.help_func import (compute_stat, minimize_bias,
                                  optimize_std_quot_brentq,
-                                 melt_f_calib_geod_prep_inversion)
+                                 melt_f_calib_geod_prep_inversion,
+                                 minimize_winter_mb_brentq_geod_via_pf,
+                                 optimize_std_quot_brentq_via_temp_b_w_min_winter_geod_bias)
 
 from MBsandbox.mbmod_daily_oneflowline import (process_era5_daily_data,
                                                TIModel, TIModel_Sfc_Type)
 from MBsandbox.mbmod_daily_oneflowline import (process_w5e5_data,
                                                AvgClimateMassBalance_TIModel,
                                                ConstantMassBalance_TIModel,
-                                               RandomMassBalance_TIModel)
+                                               )
 
 # optimal values for HEF of mu_star for cte lapse rates (for wgms direct MB)
 mu_star_opt_cte = {'mb_monthly': 213.561413,
@@ -51,22 +53,18 @@ mu_star_opt_cte = {'mb_monthly': 213.561413,
 mu_star_opt_var = {'mb_monthly': 195.322804,
                    'mb_pseudo_daily': 167.506525,
                    'mb_real_daily': 159.912743}
-# precipitation factor
+# random precipitation factor
 pf = 2.5
 
-
-# %%
 class Test_diff_models:
     @pytest.mark.parametrize('mb_type', ['mb_monthly', 'mb_pseudo_daily'])
     def test_avgclimate_mb_model_timodel(self, gdir, mb_type):
         #todo: do this for real_daily!!!
-        url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
-        path_geodetic = utils.file_downloader(url)
-        pd_geodetic = pd.read_csv(path_geodetic, index_col='rgiid')
+        pd_geodetic = utils.get_geodetic_mb_dataframe()
         pd_geodetic = pd_geodetic.loc[pd_geodetic.period == '2000-01-01_2020-01-01']
         gdir_geodetic = pd_geodetic.loc[gdir.rgi_id]['dmdtda'] * 1000
         cfg.PARAMS['hydro_month_nh'] = 1
-        pf =1
+        pf = 1
         if mb_type == 'mb_monthly':
             melt_f_calib = 217.8
             #glen_a_fac = 5.958421001753519
@@ -81,14 +79,12 @@ class Test_diff_models:
                                      temporal_resol=temporal_resol,
                                      climate_type=climate_type)
         rho = cfg.PARAMS['ice_density']
-        #workflow.execute_entity_task(tasks.init_present_time_glacier, [gdir])
-
         h, w = gdir.get_inversion_flowline_hw()
 
         cmb_mod = ConstantMassBalance_TIModel(gdir, melt_f_calib, prcp_fac=pf,
-                                              mb_type= mb_type,
-                                              grad_type = grad_type,
-                                              baseline_climate = climate_type,
+                                              mb_type=mb_type,
+                                              grad_type=grad_type,
+                                              baseline_climate=climate_type,
                                               y0=y0, halfsize=hs)
         ombh = cmb_mod.get_annual_mb(h) * SEC_IN_YEAR * rho
         otmb = np.average(ombh, weights=w)
@@ -96,17 +92,15 @@ class Test_diff_models:
         np.testing.assert_allclose(gdir_geodetic, otmb, atol=17)
 
         avg_mod = AvgClimateMassBalance_TIModel(gdir, melt_f_calib, prcp_fac=pf,
-                                              mb_type= mb_type,
-                                              grad_type = grad_type,
-                                              baseline_climate = climate_type,
-                                              y0=y0, halfsize=hs)
+                                                mb_type= mb_type,
+                                                grad_type=grad_type,
+                                                baseline_climate=climate_type,
+                                                y0=y0, halfsize=hs)
         ombh = avg_mod.get_annual_mb(h) * SEC_IN_YEAR * rho
         otmb = np.average(ombh, weights=w)
         # This is now wrong -> but not too far we hope...
-        #np.testing.assert_allclose(gdir_geodetic, otmb, rtol=0.2)
+        # np.testing.assert_allclose(gdir_geodetic, otmb, rtol=0.2)
         np.testing.assert_allclose(gdir_geodetic, otmb, atol=150)
-
-        #np.testing.assert_allclose(0., otmb, atol=130)
 
         # Another simulation
         cmb_mod = ConstantMassBalance_TIModel(gdir, melt_f_calib, prcp_fac=pf,
@@ -117,25 +111,24 @@ class Test_diff_models:
         ombh = cmb_mod.get_annual_mb(h) * SEC_IN_YEAR * rho
         otmb = np.average(ombh, weights=w)
 
-
         avg_mod = AvgClimateMassBalance_TIModel(gdir, melt_f_calib, prcp_fac=pf,
-                                              mb_type= mb_type,
-                                              grad_type = grad_type,
-                                              baseline_climate = climate_type,
-                                              y0=1991, halfsize=hs)
+                                                mb_type= mb_type,
+                                                grad_type = grad_type,
+                                                baseline_climate = climate_type,
+                                                y0=1991, halfsize=hs)
 
         _ombh = avg_mod.get_annual_mb(h) * SEC_IN_YEAR * rho
         _otmb = np.average(_ombh, weights=w)
         # This is now wrong -> but not too far we hope...
         np.testing.assert_allclose(otmb, _otmb, atol=200)
 
-class Test_geodetic_sfc_type:
 
+class Test_geodetic_sfc_type:
     def test_sfc_type_linear_vs_neg_exp(self, gdir, mb_type='mb_monthly'):
         cfg.PARAMS['hydro_month_nh'] = 1
         # just choose any random melt_f
         melt_f_ratio = 0.5
-        tau_e_fold_yr = 0.5 # yr (6 months, e-folding change of melt_f)
+        tau_e_fold_yr = 0.5  # yr (6 months, e-folding change of melt_f)
         melt_f_ice = 300
         pf = 2  # precipitation factor
 
@@ -143,7 +136,6 @@ class Test_geodetic_sfc_type:
         temporal_resol = 'monthly'
         process_w5e5_data(gdir, temporal_resol=temporal_resol,
                           climate_type=baseline_climate)
-        h, w = gdir.get_inversion_flowline_hw()
 
         # with normal spinup for 6 years
         mb_mod_monthly_0_5_m_neg_exp = TIModel_Sfc_Type(gdir, melt_f_ice, mb_type=mb_type,
@@ -153,7 +145,7 @@ class Test_geodetic_sfc_type:
                                                         tau_e_fold_yr=tau_e_fold_yr,  # default
                                                         baseline_climate=baseline_climate)
         melt_f_snow = melt_f_ice * melt_f_ratio
-        time = np.linspace(0, 6, len(mb_mod_monthly_0_5_m_neg_exp.buckets + ['ice'])) # in years
+        time = np.linspace(0, 6, len(mb_mod_monthly_0_5_m_neg_exp.buckets + ['ice']))  # in years
         melt_f_buckets = melt_f_ice + (melt_f_snow - melt_f_ice) * np.exp(- time / tau_e_fold_yr)  # s: in months
 
         assert_allclose(np.fromiter(mb_mod_monthly_0_5_m_neg_exp.melt_f_buckets.values(),
@@ -162,11 +154,11 @@ class Test_geodetic_sfc_type:
 
         # if melt_f_ratio_snow_to_ice is 1, the melt_f should be everywhere the same
         mb_mod_monthly_1_m_neg_exp_tau_0_5 = TIModel_Sfc_Type(gdir, melt_f_ice, mb_type=mb_type,
-                                                        melt_f_ratio_snow_to_ice=1, prcp_fac=pf,
-                                                        melt_f_update='monthly',
-                                                        melt_f_change='neg_exp',
-                                                        tau_e_fold_yr=tau_e_fold_yr,  # default
-                                                        baseline_climate=baseline_climate)
+                                                              melt_f_ratio_snow_to_ice=1, prcp_fac=pf,
+                                                              melt_f_update='monthly',
+                                                              melt_f_change='neg_exp',
+                                                              tau_e_fold_yr=tau_e_fold_yr,  # default
+                                                              baseline_climate=baseline_climate)
         assert_allclose(np.fromiter(mb_mod_monthly_1_m_neg_exp_tau_0_5.melt_f_buckets.values(),
                                     dtype=float),
                         melt_f_ice)
@@ -176,9 +168,9 @@ class Test_geodetic_sfc_type:
                                                                   melt_f_ratio_snow_to_ice=melt_f_ratio,
                                                                   prcp_fac=pf,
                                                                   melt_f_update='monthly',
-                                                              melt_f_change='neg_exp',
-                                                              tau_e_fold_yr=1e9,  # default
-                                                              baseline_climate=baseline_climate)
+                                                                  melt_f_change='neg_exp',
+                                                                  tau_e_fold_yr=1e9,  # default
+                                                                  baseline_climate=baseline_climate)
         assert_allclose(np.fromiter(mb_mod_monthly_0_5_m_neg_exp_tau_large.melt_f_buckets.values(),
                                     dtype=float),
                         melt_f_ice*melt_f_ratio)
@@ -189,7 +181,6 @@ class Test_geodetic_sfc_type:
                              prcp_fac=pf, melt_f_update='monthly', melt_f_change='neg_exp',
                              tau_e_fold_yr=0,  # default
                              baseline_climate=baseline_climate)
-
 
     def test_sfc_type_update(self, gdir, mb_type='mb_monthly'):
         cfg.PARAMS['hydro_month_nh'] = 1
@@ -252,9 +243,8 @@ class Test_geodetic_sfc_type:
                           climate_type=baseline_climate)
 
         mb_mod_1 = TIModel_Sfc_Type(gdir, melt_f, mb_type=mb_type,
-                                  melt_f_ratio_snow_to_ice=1, prcp_fac=pf,
-                                    baseline_climate=baseline_climate
-                                    )
+                                    melt_f_ratio_snow_to_ice=1, prcp_fac=pf,
+                                    baseline_climate=baseline_climate)
 
         mb_mod_no_sfc_type = TIModel(gdir, melt_f, mb_type=mb_type,
                                      prcp_fac=pf,
@@ -323,8 +313,7 @@ class Test_geodetic_sfc_type:
             mb_mod_1.get_monthly_mb(h, year=date_to_floatyear(year+1, 6), spinup=True,
                                     auto_spinup=False)
 
-
-        # check if specific mass balance equal?
+        # check if specific mass balance equal of TIModel equals TIModelSfcType if ratio=1:
         # use the years from geodetic data
         years = np.arange(2000, 2020)
         fls = gdir.read_pickle('inversion_flowlines')
@@ -337,13 +326,11 @@ class Test_geodetic_sfc_type:
         mb_mod_1.reset_pd_mb_bucket()
         spec_1 = mb_mod_1.get_specific_mb(year=years, fls=fls)
         spec_no_sfc_type = mb_mod_no_sfc_type.get_specific_mb(year=years, fls=fls)
-
+        # here is the actual check:
         assert_allclose(spec_1, spec_no_sfc_type)
 
         # next: check if optimizer works for both !
-        url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
-        path = utils.file_downloader(url)
-        pd_geodetic = pd.read_csv(path, index_col='rgiid')
+        pd_geodetic = utils.get_geodetic_mb_dataframe()
         pd_geodetic = pd_geodetic.loc[pd_geodetic.period == '2000-01-01_2020-01-01']
         mb_geodetic = pd_geodetic.loc[df].dmdtda.values * 1000
 
@@ -356,11 +343,12 @@ class Test_geodetic_sfc_type:
         mb_mod_1.melt_f = melt_f_opt_1
 
         melt_f_opt_no_sfc_type = scipy.optimize.brentq(minimize_bias_geodetic, 1, 1000,
-                                              xtol=0.01, args=(mb_mod_no_sfc_type,
-                                                               mb_geodetic,
-                                                               h, w, pf, False,
-                                                               np.arange(2000, 2020, 1),
-                                                               False, True), disp=True)
+                                                       xtol=0.01,
+                                                       args=(mb_mod_no_sfc_type,
+                                                             mb_geodetic,
+                                                             h, w, pf, False,
+                                                             np.arange(2000, 2020, 1),
+                                                             False, True), disp=True)
         mb_mod_no_sfc_type.melt_f = melt_f_opt_no_sfc_type
         # they should optimize to the same melt_f
         assert_allclose(melt_f_opt_1, melt_f_opt_no_sfc_type)
@@ -376,32 +364,31 @@ class Test_geodetic_sfc_type:
         assert np.shape(mb_mod_1.pd_mb_monthly) == (len(mb_mod_1.fl.dis_on_line), 0)
         assert np.all(mb_mod_1.pd_bucket == 0)
 
-        spec_1 = mb_mod_1.get_specific_mb(year=years, fls=fls) #, spin)
+        spec_1 = mb_mod_1.get_specific_mb(year=years, fls=fls)
         # now check if the pd_mb buckets are filled up
         # if melt_f_update == annual (here), have len(years) + spinup_yrs s as amount of columns
         assert np.shape(mb_mod_1.pd_mb_annual) == (len(mb_mod_1.fl.dis_on_line),
-                                                   len(years)+ mb_mod_1.spinup_yrs)
+                                                   len(years) + mb_mod_1.spinup_yrs)
         # no monthly update done (because only get_annual_mb here)
         assert np.shape(mb_mod_1.pd_mb_monthly) == (len(mb_mod_1.fl.dis_on_line), 0)
         assert np.any(mb_mod_1.pd_bucket >= 0)
-
         spec_no_sfc_type = mb_mod_no_sfc_type.get_specific_mb(year=years, fls=fls)
-
+        # actual check if TIModel and TIModel_Sfc_Type with ratio=1 and monthly update are equal
         assert_allclose(spec_1, spec_no_sfc_type)
 
         # now include the surface type distinction and choose the
         # melt factor of snow to be 0.5* smaller than the melt factor of ice
         mb_mod_0_5 = TIModel_Sfc_Type(gdir, melt_f, mb_type=mb_type,
-                                  melt_f_ratio_snow_to_ice=0.5, prcp_fac=pf,
+                                      melt_f_ratio_snow_to_ice=0.5, prcp_fac=pf,
                                       baseline_climate=baseline_climate
                                       )
         melt_f_opt_0_5 = scipy.optimize.brentq(minimize_bias_geodetic, 1, 1000,
-                                              xtol=0.01, args=(mb_mod_0_5,
-                                                               mb_geodetic,
-                                                               h, w, pf, False,
-                                                               np.arange(2000, 2020, 1),
-                                                               False, True),
-                                              disp=True)
+                                               xtol=0.01, args=(mb_mod_0_5,
+                                                                mb_geodetic,
+                                                                h, w, pf, False,
+                                                                np.arange(2000, 2020, 1),
+                                                                False, True),
+                                               disp=True)
         # check reproducibility
         melt_f_check_0_5 = {'mb_monthly': 403.897452,
                             'mb_pseudo_daily': 306.490551,
@@ -457,9 +444,87 @@ class Test_geodetic_sfc_type:
         assert np.all(mb_mod_0_5.pd_mb_monthly.columns.values == np.array([date_to_floatyear(year_test, m)
                                                            for m in np.arange(1,6,1)]))
 
+    # this test is here to show that it fails
+    @pytest.mark.parametrize('mb_type', [ 'mb_monthly']) # ,'mb_pseudo_daily', 'mb_real_daily'])
+    def test_monthly_mb_for_annual_mb(self, gdir, mb_type):
+
+        # wip
+        # this will actually never work unless we change TIModel_Sfc_Type with melt_f_update = 'annual'
+        # if we want it to work, we would need to loop over the months inside of get_annual_mb()
+        # for m in months:
+        #   get_montly_mb(---)
+        #
+
+        cfg.PARAMS['hydro_month_nh'] = 1
+        # just choose any random melt_f here
+        melt_f = 200
+        pf = 2  # precipitation factor
+
+        baseline_climate = 'W5E5'
+        if mb_type != 'mb_real_daily':
+            temporal_resol = 'monthly'
+        else:
+            temporal_resol = 'daily'
+        process_w5e5_data(gdir, temporal_resol=temporal_resol,
+                          climate_type=baseline_climate,
+                          )
+
+        # those two should be similar but not equal!
+        mb_mod_0_5_a = TIModel_Sfc_Type(gdir, melt_f, mb_type=mb_type,
+                                  melt_f_ratio_snow_to_ice=0.5, prcp_fac=pf,
+                                    melt_f_update='annual',
+                                  baseline_climate=baseline_climate
+                                    )
+        mb_mod_0_5_m = TIModel_Sfc_Type(gdir, melt_f, mb_type=mb_type,
+                                          melt_f_ratio_snow_to_ice=0.5, prcp_fac=pf,
+                                          melt_f_update='monthly',
+                                          baseline_climate=baseline_climate)
+
+        h, w = gdir.get_inversion_flowline_hw()
+
+        annual_a_via_monthly = []
+        annual_m_via_monthly = []
+        annual_a = []
+        annual_m = []
+        for y in np.arange(2000, 2003, 1):
+            #annual_a = mb_mod_0_5_a.get_annual_mb(h, year=y)
+            #annual_a = mb_mod_0_5_a.get_annual_mb(h, year=y)
+            # after that it needs to reset again because the year just before was already computed
+            for m in np.arange(1,13,1):
+                floatyr = utils.date_to_floatyear(y, m)
+                mb_mod_0_5_a.get_monthly_mb(h, year=floatyr)
+                mb_mod_0_5_m.get_monthly_mb(h, year=floatyr)
+
+            annual_a_via_monthly.append(mb_mod_0_5_a.get_annual_mb(h, year=y))
+            annual_m_via_monthly.append(mb_mod_0_5_m.get_annual_mb(h, year=y))
+
+        bucket_a_via_monthly_2003 = mb_mod_0_5_a.pd_bucket
+
+        # should have spinup years and year 2000-2002
+        assert_allclose(mb_mod_0_5_m.pd_mb_annual.columns.values, np.arange(2000 - 6, 2003, 1))
+        assert_allclose(mb_mod_0_5_a.pd_mb_annual.columns.values, np.arange(2000 - 6, 2003, 1))
+        # if annual update: should only have monthly mb starting with 2000 (not for the spinup years!)
+        assert len(mb_mod_0_5_a.pd_mb_monthly.columns.values) == 12 * 3
+        # if monthly update: should also have monthly mb for spinup years
+        assert len(mb_mod_0_5_m.pd_mb_monthly.columns.values) == 12 * (3 + 6)
+
+        # let's now compute the MB directly via get_annual_mb -> we should get out the same estimates at the end:
+        mb_mod_0_5_m.reset_pd_mb_bucket()
+        mb_mod_0_5_a.reset_pd_mb_bucket()
+        for y in np.arange(2000, 2003, 1):
+            annual_a.append(mb_mod_0_5_a.get_annual_mb(h, year=y))
+            annual_m.append(mb_mod_0_5_m.get_annual_mb(h, year=y))
+        # bucket_a_2003 = mb_mod_0_5_a.pd_bucket
+        # monthly works as it should
+        assert_allclose(annual_m_via_monthly, annual_m)
+
+        # but annual has a problem!
+        # this is failing, which shows that there are definitely differences
+        assert_allclose(annual_a_via_monthly, annual_a, rtol=1e-2)
 
 
     #@pytest.mark.skip(reason="slow, not important for sarah")
+    # in addition it only works if we allow large differences
     @pytest.mark.slow
     @pytest.mark.parametrize('mb_type', [ 'mb_monthly','mb_pseudo_daily',
                                          'mb_real_daily'
@@ -467,11 +532,10 @@ class Test_geodetic_sfc_type:
     def test_annual_vs_monthly_melt_f_update(self, gdir, mb_type):
 
         # wip
+        # monthly_melt_f with melt_f_ratio=1 gives same results as monthly_melt_f with TIModel
         # needs to check whether annual and monthly melt_f give similar results
-        # whether monthly_melt_f with ratio=1 gives same results as monthly_melt_f with TIModel
-        # also need to adapt get_specific_mb(), otherwise melt_f is calibrated to sth.
-        # where no melt_f_update is done -> somehow need to calibrate to get_specific_mb(melt_f_update=monthly)
-        # where the monthly mb is summed up ???
+        # this works in case of monthly melt_f_update
+        # but not in case of annual melt_f_update (it works here only because we allowed strong differences)
 
         cfg.PARAMS['hydro_month_nh'] = 1
         # just choose any random melt_f
@@ -607,7 +671,6 @@ class Test_geodetic_sfc_type:
 
             #TODO: at the moment this is very different, should it be more similar???
             # normally yes, mass balance should not be more different then 2*the annual value ???
-            # why is s
             #test_m = mb_mod_monthly_0_5_m.pd_mb_monthly[mb_mod_monthly_0_5_m.pd_mb_monthly.columns[-12:]].mean(axis=1)
             #test_a = mb_mod_annual_0_5_a.pd_mb_annual[2000].values
             #mb_mod_annual_0_5_a.pd_mb_annual
@@ -636,6 +699,8 @@ class Test_geodetic_sfc_type:
         spec_0_5_a = mb_mod_annual_0_5_a.get_specific_mb(year=years, fls=fls) #, spinup=True)
         # specific mass balance is also quite different, does this make sense???
         # if monthly, specific mb rather smaller but not always!!!
+
+        # HERE ARE LARGE DIFFERENCES THAT ARE NOT CORRECT
         if mb_type == 'mb_real_daily':
             assert_allclose(spec_0_5_m.mean(), spec_0_5_a.mean(), rtol=1.2)  # for pseudo_daily 0.45
             assert_allclose(spec_0_5_m, spec_0_5_a, atol=200) # 1.6 for mb_montly
@@ -645,9 +710,7 @@ class Test_geodetic_sfc_type:
 
         # Check if optimizer works
         # get geodetic data
-        url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
-        path = utils.file_downloader(url)
-        pd_geodetic = pd.read_csv(path, index_col='rgiid')
+        pd_geodetic = utils.get_geodetic_mb_dataframe()
         pd_geodetic = pd_geodetic.loc[pd_geodetic.period == '2000-01-01_2020-01-01']
         mb_geodetic = pd_geodetic.loc[df].dmdtda.values * 1000
 
@@ -785,13 +848,270 @@ class Test_geodetic_sfc_type:
         if mb_type != 'mb_real_daily':
             assert np.shape(temp_avg_2d) == (len(h), 12)
 
-
-        temp_avg_2d_clim = mb_mod.get_2d_avg_annual_air_hydro_temp(h,
-                                                              year=year,
-                                                              avg_climate=True)
+        temp_avg_2d_clim = mb_mod.get_2d_avg_annual_air_hydro_temp(h, year=year, avg_climate=True)
         temp_avg_2d_clim.mean(axis=1)
         if mb_type != 'mb_real_daily':
             assert np.shape(temp_avg_2d_clim) == (len(h), 12*31)
+
+    def test_specific_winter_mb(self, gdir, gdir_aletsch):
+
+        _, path = utils.get_wgms_files()
+        pd_mb_overview = pd.read_csv(path[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
+                                     index_col='Unnamed: 0')
+        pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
+        pd_mb_overview_sel_gdir.index = pd_mb_overview_sel_gdir.Year
+        assert np.all(pd_mb_overview_sel_gdir.day_BEGIN_PERIOD == 1)
+        assert np.all(pd_mb_overview_sel_gdir.month_BEGIN_PERIOD == 10)
+        assert np.all(pd_mb_overview_sel_gdir.month_END_WINTER == 4)
+        assert np.all(pd_mb_overview_sel_gdir.day_END_WINTER == 30)
+        pd_mb_overview_sel_gdir_years = pd_mb_overview_sel_gdir.Year.values
+
+        pd_mb_overview_sel_gdir_aletsch = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir_aletsch.rgi_id]
+        pd_mb_overview_sel_gdir_aletsch.index = pd_mb_overview_sel_gdir_aletsch.Year
+
+        pd_mb_overview_sel_gdir_years_aletsch = pd_mb_overview_sel_gdir_aletsch.Year.values
+
+        cfg.PARAMS['hydro_month_nh'] = 1
+        # just choose any random melt_f
+        melt_f = 200
+        pf = 2  # precipitation factor
+        h, w = gdir.get_inversion_flowline_hw()
+        h_aletsch, w_aletsch = gdir_aletsch.get_inversion_flowline_hw()
+        mb_type = 'mb_monthly'
+
+        baseline_climate = 'W5E5'
+        if mb_type != 'mb_real_daily':
+            temporal_resol = 'monthly'
+        else:
+            temporal_resol = 'daily'
+        workflow.execute_entity_task(process_w5e5_data, [gdir, gdir_aletsch],
+                                     temporal_resol=temporal_resol,
+                                     climate_type=baseline_climate,
+                                     )
+
+        # those two should be equal!!!
+        mb_mod = TIModel_Sfc_Type(gdir, melt_f, mb_type=mb_type,
+                                  melt_f_ratio_snow_to_ice=0.5,
+                                  prcp_fac=pf,
+                                  melt_f_update='monthly',
+                                  baseline_climate=baseline_climate)
+        mb_mod_aletsch = TIModel_Sfc_Type(gdir_aletsch, melt_f, mb_type=mb_type,
+                                  melt_f_ratio_snow_to_ice=0.5,
+                                  prcp_fac=pf,
+                                  melt_f_update='monthly',
+                                  baseline_climate=baseline_climate)
+
+        # in case of HEF this should be the same !!! (as HEF always has WGMS seasonal MB from Oct 1st to April 30th)
+        out_w_period_from_wgms = mb_mod.get_specific_winter_mb(heights=h, year=pd_mb_overview_sel_gdir_years, widths=w,
+                                                               add_climate=True,
+                                                               period_from_wgms=True)
+        out_w_default_period = mb_mod.get_specific_winter_mb(heights=h, year=pd_mb_overview_sel_gdir_years, widths=w,
+                                                             add_climate=True,
+                                                             period_from_wgms=False)
+        for k, _ in enumerate(out_w_default_period):
+            np.testing.assert_allclose(out_w_default_period[k],
+                                       out_w_period_from_wgms[k])
+
+        # in case of Aletsch glacier they should not be equal:
+        # first precompute it (like that also years in between (without observations) are estimated)
+        mb_mod_aletsch.get_specific_mb(heights=h_aletsch, widths=w_aletsch,
+                                       year=np.arange(pd_mb_overview_sel_gdir_years_aletsch[0],
+                                                        pd_mb_overview_sel_gdir_years_aletsch[-1]+1, 1))
+        out_w_period_from_wgms_aletsch = mb_mod_aletsch.get_specific_winter_mb(heights=h_aletsch,
+                                                                       year=pd_mb_overview_sel_gdir_years_aletsch,
+                                                                       widths=w_aletsch,
+                                                               add_climate=True,
+                                                               period_from_wgms=True)
+        out_w_default_period_aletsch = mb_mod_aletsch.get_specific_winter_mb(heights=h_aletsch,
+                                                                     year=pd_mb_overview_sel_gdir_years_aletsch,
+                                                                     widths=w_aletsch,
+                                                             add_climate=True,
+                                                             period_from_wgms=False)
+        # specific winter mb can be different but not too much!
+        np.testing.assert_allclose(out_w_period_from_wgms_aletsch[0],
+                                   out_w_default_period_aletsch[0], rtol=0.5)
+        # actually differences up to rtol=0.39!!!
+        for e, y in enumerate(pd_mb_overview_sel_gdir_aletsch.Year):
+            # if the actual WGMS period is longer than the default Oct1st - Apr30 period, at least precipitation
+            # should be more!
+            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype(np.datetime64)[y].month < 10
+            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype(np.datetime64)[y].month > 4
+            if condi_m_e and condi_m_s:
+                ### all those that are always above zero and are summed up should be larger:
+                # tfm (here it can also be equal)
+                assert np.all(out_w_period_from_wgms_aletsch[-3][e] >= out_w_default_period_aletsch[-3][e])
+                # liquid prcp
+                assert np.all(out_w_period_from_wgms_aletsch[-2][e] > out_w_default_period_aletsch[-2][e])
+                # solid prcp
+                assert np.all(out_w_period_from_wgms_aletsch[-1][e] >= out_w_default_period_aletsch[-1][e])
+
+            # if the actual WGMS period is short than the default Oct1st - Apr30 period, at least precipitation
+            # should be smaller!
+            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype(np.datetime64)[y].month >= 10
+            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype(np.datetime64)[y].month <= 4
+            if condi_m_e and condi_m_s:
+                ### all those that are always above zero and are summed up should be larger:
+                # tfm (here it can also be equal)
+                assert np.all(out_w_period_from_wgms_aletsch[-3][e] <= out_w_default_period_aletsch[-3][e])
+                # liquid prcp
+                assert np.all(out_w_period_from_wgms_aletsch[-2][e] > out_w_default_period_aletsch[-2][e])
+                # solid prcp
+                assert np.all(out_w_period_from_wgms_aletsch[-1][e] <= out_w_default_period_aletsch[-1][e])
+
+        # let's calibrate the model to match winter MB bias and check if it worked
+        # we only do it for Aletsch glacier here (there it is more complicated and more prone to errors)
+        pd_geodetic_all = oggm.utils.get_geodetic_mb_dataframe()
+        pd_geodetic = pd_geodetic_all.loc[pd_geodetic_all.period == '2000-01-01_2020-01-01']
+        mb_geodetic = pd_geodetic.loc[gdir_aletsch.rgi_id].dmdtda * 1000
+        pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
+        pd_mb_overview_sel_gdir.index = pd_mb_overview_sel_gdir.Year
+        yrs_seasonal_mbs = pd_mb_overview_sel_gdir.Year.values
+        assert np.all(yrs_seasonal_mbs >= 1980)
+        assert np.all(yrs_seasonal_mbs < 2020)
+        # yrs_seasonal_mbs = gdir.get_ref_mb_data(input_filesuffix=input_fs)['SUMMER_BALANCE'].dropna().index.values
+        # yrs_seasonal_mbs = yrs_seasonal_mbs[(yrs_seasonal_mbs >= 1980) & (yrs_seasonal_mbs < 2020)] # I can't use 1979 (as then we would need climate data in winter 1978!)
+        winter_mb_observed = gdir_aletsch.get_ref_mb_data(input_filesuffix='_monthly_W5E5')
+        winter_mb_observed = winter_mb_observed.loc[pd_mb_overview_sel_gdir_years_aletsch]['WINTER_BALANCE']
+        try:
+            pf_opt = scipy.optimize.brentq(minimize_winter_mb_brentq_geod_via_pf, 0.1, 5, xtol=0.1,
+                                           args=(mb_mod_aletsch, mb_geodetic, winter_mb_observed,
+                                                 h_aletsch, w_aletsch, pd_mb_overview_sel_gdir_years_aletsch,
+                                                 True) #period_from_wgms
+                                           )
+        except:
+            melt_f_opt_dict = {}
+            for pf in np.concatenate([np.arange(0.1, 3, 0.5), np.arange(3, 10, 2)]):
+                try:
+                    melt_f = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
+                                                   xtol=0.01,
+                                                   args=(mb_mod_aletsch, mb_geodetic,
+                                                         h_aletsch, w_aletsch, pf),
+                                                   disp=True)
+                    melt_f_opt_dict[pf] = melt_f
+                except:
+                    pass
+            pf_start = list(melt_f_opt_dict.items())[0][0]
+            pf_end = list(melt_f_opt_dict.items())[-1][0]
+
+            pf_opt = scipy.optimize.brentq(minimize_winter_mb_brentq_geod_via_pf, pf_start, pf_end, xtol=0.1,
+                                           args=(mb_mod_aletsch, mb_geodetic, winter_mb_observed,
+                                                 h_aletsch, w_aletsch, pd_mb_overview_sel_gdir_years_aletsch,
+                                                 True)  # period_from_wgms
+                                           )
+
+        mb_mod_aletsch.pf_opt = pf_opt
+        mb_mod_aletsch.melt_f = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
+                                                      xtol=0.01,
+                                                      args=(mb_mod_aletsch, mb_geodetic,
+                                                            h_aletsch, w_aletsch, pf_opt),
+                                                      disp=True)
+
+        # first precompute it (like that also years in between (without observations) are estimated)
+        # [only important for TIModel_Sfc_Type, if observations have missing years in between]
+
+        mb_mod_aletsch.get_specific_mb(heights=h_aletsch, widths=w_aletsch,
+                                       year=np.arange(pd_mb_overview_sel_gdir_years_aletsch[0],
+                                                      pd_mb_overview_sel_gdir_years_aletsch[-1] + 1, 1))
+        outi_right_period = mb_mod_aletsch.get_specific_winter_mb(heights=h_aletsch,
+                                                                  year=pd_mb_overview_sel_gdir_years_aletsch,
+                                                                  widths=w_aletsch,
+                                                                  add_climate=True,
+                                                                  period_from_wgms=True)
+        # observed and modelled winter mb bias should be similar now (as prcp-fac was calibrated to match it!)
+        np.testing.assert_allclose(outi_right_period[0].mean(),
+                                   winter_mb_observed.mean(), rtol=0.05)
+
+
+        ### 3-step calibration -> this is WIP -> not working at the moment!!!
+        # fs = '_monthly_W5E5'
+        # mb_glaciological = gdir.get_ref_mb_data(input_filesuffix=fs)['ANNUAL_BALANCE']
+        # ys_glac = mb_glaciological.index.values
+        #
+        # try:
+        #     mb_mod_aletsch.temp_b = scipy.optimize.brentq(optimize_std_quot_brentq_via_temp_b_w_min_winter_geod_bias,
+        #                                                   -3, 3, xtol=0.01,
+        #                                                   args=(mb_mod_aletsch,
+        #                                                            mb_geodetic,
+        #                                                            winter_mb_observed,
+        #                                                            pd_mb_overview_sel_gdir_years_aletsch,
+        #                                                            mb_glaciological,
+        #                                                            ys_glac,
+        #                                                            h_aletsch, w_aletsch),
+        #                                                   disp=True)
+        # except:
+        #     mb_mod_aletsch.temp_b = scipy.optimize.brentq(optimize_std_quot_brentq_via_temp_b_w_min_winter_geod_bias,
+        #                                                   0, 3, xtol=0.01,
+        #                                                   args=(mb_mod_aletsch,
+        #                                                         mb_geodetic,
+        #                                                         winter_mb_observed,
+        #                                                         pd_mb_overview_sel_gdir_years_aletsch,
+        #                                                         mb_glaciological,
+        #                                                         ys_glac,
+        #                                                         h_aletsch, w_aletsch),
+        #                                                   disp=True)
+        #
+        # try:
+        #     pf_opt = scipy.optimize.brentq(minimize_winter_mb_brentq_geod_via_pf, 0.1, 5, xtol=0.1,
+        #                                    args=(mb_mod_aletsch, mb_geodetic, winter_mb_observed,
+        #                                          h_aletsch, w_aletsch, pd_mb_overview_sel_gdir_years_aletsch,
+        #                                          True) #period_from_wgms
+        #                                    )
+        # except:
+        #     melt_f_opt_dict = {}
+        #     for pf in np.concatenate([np.arange(0.1, 3, 0.5), np.arange(3, 10, 2)]):
+        #         try:
+        #             melt_f = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
+        #                                            xtol=0.01,
+        #                                            args=(mb_mod_aletsch, mb_geodetic,
+        #                                                  h_aletsch, w_aletsch, pf),
+        #                                            disp=True)
+        #             melt_f_opt_dict[pf] = melt_f
+        #         except:
+        #             pass
+        #     pf_start = list(melt_f_opt_dict.items())[0][0]
+        #     pf_end = list(melt_f_opt_dict.items())[-1][0]
+        #
+        #     pf_opt = scipy.optimize.brentq(minimize_winter_mb_brentq_geod_via_pf, pf_start, pf_end, xtol=0.1,
+        #                                    args=(mb_mod_aletsch, mb_geodetic, winter_mb_observed,
+        #                                          h_aletsch, w_aletsch, pd_mb_overview_sel_gdir_years_aletsch,
+        #                                          True)  # period_from_wgms
+        #                                    )
+        #
+        # mb_mod_aletsch.pf_opt = pf_opt
+        # mb_mod_aletsch.melt_f = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
+        #                                               xtol=0.01,
+        #                                               args=(mb_mod_aletsch, mb_geodetic,
+        #                                                     h_aletsch, w_aletsch, pf_opt),
+        #                                               disp=True)
+        #
+        # mb_mod_aletsch.get_specific_mb(heights=h_aletsch, widths=w_aletsch,
+        #                                year=np.arange(1979, 2020,1) )
+        # specific_winter_mb = mb_mod_aletsch.get_specific_winter_mb(heights=h_aletsch,
+        #                                                           year=pd_mb_overview_sel_gdir_years_aletsch,
+        #                                                           widths=w_aletsch,
+        #                                                           add_climate=True,
+        #                                                           period_from_wgms=True)
+        #
+        # # observed and modelled winter mb bias should be similar now (as prcp-fac was calibrated to match it!)
+        # np.testing.assert_allclose(specific_winter_mb[0].mean(),
+        #                            winter_mb_observed.mean(), rtol=0.05)
+        #
+        # #
+        # mean_modelled_geod_period = mb_mod_aletsch.get_specific_mb(heights=h_aletsch, widths=w_aletsch,
+        #                                year=np.arange(2000, 2020,1) ).mean()
+        # # observed geodetic mean should be equal to modelled time period
+        # np.testing.assert_allclose(mean_modelled_geod_period,
+        #                            mb_geodetic, rtol=0.05)
+        #
+        # annual_modelled_std_period = mb_mod_aletsch.get_specific_mb(heights=h_aletsch, widths=w_aletsch,
+        #                                                            year=ys_glac).mean()
+
+
+
+
+
+
+
 
 
 
@@ -895,9 +1215,7 @@ class Test_geodetic_hydro1:
         grad_type = 'cte'
         N = 100
         # get the geodetic calibration data
-        url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
-        path_geodetic = utils.file_downloader(url)
-        pd_geodetic_all = pd.read_csv(path_geodetic, index_col='rgiid')
+        pd_geodetic_all = utils.get_geodetic_mb_dataframe()
         pd_geodetic = pd_geodetic_all.loc[pd_geodetic_all.period == '2000-01-01_2020-01-01']
         mb_geodetic = pd_geodetic.loc[gdir.rgi_id].dmdtda * 1000
 
@@ -990,6 +1308,113 @@ class Test_geodetic_hydro1:
         assert_allclose(melt_fs[0], melt_fs[1], rtol= 0.2)
         assert_allclose(melt_fs[0], melt_fs[2], rtol= 0.2)
 
+    def test_optimize_std_quot_brentq_W5E5_via_temp_bias(self, gdir):
+        # check if double optimisation of bias and std_quotient works
+        # when calibrating melt_f as first variable and tuning temp. bias to match WGMS ref glacier std dev.
+        # the prcp. fac is here not used for calibration (just set to a cte "arbitrary" value)
+        from MBsandbox.help_func import optimize_std_quot_brentq_geod_via_temp_bias
+        # just use a possible precipitation factor (it is here constant and not calibrated)
+        pf = 1
+
+        cfg.PARAMS['hydro_month_nh'] = 1
+
+        grad_type = 'cte'
+        N = 100
+        # get the geodetic calibration data
+        pd_geodetic_all = utils.get_geodetic_mb_dataframe()
+
+        pd_geodetic = pd_geodetic_all.loc[pd_geodetic_all.period == '2000-01-01_2020-01-01']
+        mb_geodetic = pd_geodetic.loc[gdir.rgi_id].dmdtda * 1000
+
+        melt_fs = []
+        #prcp_facs = []
+        temp_bias_s = []
+        for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_real_daily']:
+            for climate_type in ['W5E5']:
+                if mb_type != 'mb_real_daily':
+                    temporal_resol = 'monthly'
+                    process_w5e5_data(gdir, climate_type=climate_type,
+                                      temporal_resol=temporal_resol)
+                    input_fs = '_monthly_W5E5'
+                else:
+                    # because of get_climate_info need ERA5_daily as
+                    # baseline_climate until WFDE5_daily is included in
+                    # get_climate_info
+                    # cfg.PARAMS['baseline_climate'] = 'ERA5_daily'
+                    temporal_resol='daily'
+                    process_w5e5_data(gdir, climate_type=climate_type,
+                                      temporal_resol=temporal_resol)
+                    input_fs = '_daily_W5E5'
+
+                hgts, widths = gdir.get_inversion_flowline_hw()
+                fs = '_{}_{}'.format(temporal_resol, climate_type)
+                mbdf = gdir.get_ref_mb_data(input_filesuffix=fs)
+                ys_glac = mbdf.index.values
+                gd_mb = TIModel(gdir, None, prcp_fac=1,
+                                mb_type=mb_type,
+                                grad_type=grad_type,
+                                N=N, baseline_climate=climate_type)
+                mbdf = gdir.get_ref_mb_data(input_filesuffix=input_fs)
+                mb_glaciological = mbdf['ANNUAL_BALANCE']
+                try:
+                    temp_b_opt = scipy.optimize.brentq(optimize_std_quot_brentq_geod_via_temp_bias,
+                                                       -6, 6, # range of allowed temp. bias values
+                                                   args=(gd_mb, mb_geodetic, mb_glaciological, hgts, widths,
+                                                         ys_glac, pf),
+                                                   xtol=0.1)
+                except ValueError:  # (' f(a) and f(b) must have different signs'):
+                    # the temp. bias minimum (max) is just too low (high) to find an appropriate melt_f
+                    # (bias is for min & max positive)
+                    # try out with temp. bias that are less extreme
+                    # -> maybe not so good to do this, but don't have a better idea
+                    try:
+                        temp_b_opt = scipy.optimize.brentq(optimize_std_quot_brentq_geod_via_temp_bias, -3, 3,
+                                                           args=(
+                                                           gd_mb, mb_geodetic, mb_glaciological, hgts, widths,
+                                                           ys_glac, pf),
+                                                           xtol=0.1)
+                    except:
+                        temp_b_opt = scipy.optimize.brentq(optimize_std_quot_brentq_geod_via_temp_bias, -2, 2,
+                                                           args=(gd_mb, mb_geodetic, mb_glaciological,
+                                                                 hgts, widths, ys_glac, pf),
+                                                           xtol=0.1)
+                gd_mb.temp_bias = temp_b_opt
+                melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
+                                                   disp=True, xtol=0.01,
+                                                   args=(gd_mb, mb_geodetic, hgts, widths, pf))
+                gd_mb.prcp_fac = pf
+                gd_mb.melt_f = melt_f_opt
+                gd_mb.temp_bias = temp_b_opt
+                # gd_mb.historical_climate_qc_mod(gdir)
+                mb_specific = gd_mb.get_specific_mb(heights=hgts, widths=widths,
+                                                    year=np.arange(2000, 2020, 1))
+
+                mb_specific_opt_std = gd_mb.get_specific_mb(heights=hgts, widths=widths,
+                                                    year=mbdf.index.values)
+
+                #RMSD, bias, rcor, quot_std = compute_stat(mb_specific=mb_specific,
+                #                                          mbdf=mb_geodetic)
+                bias = mb_specific.mean() - mb_geodetic
+                ref_std = mb_glaciological.std()
+                mod_std = mb_specific_opt_std.std()
+                quot_std = mod_std / ref_std
+
+                # check if the bias is optimised
+                assert bias.round() == 0
+                # check if the std_quotient is optimised (does not need to be perfect!!!)
+                assert quot_std.round(1) == 1
+
+                # save melt_f and prcp_fac to compare between climate datasets
+                melt_fs.append(melt_f_opt)
+                temp_bias_s.append(temp_b_opt)
+            #            assert_allclose(melt_fs[0], melt_fs[1], rtol=0.2)
+            # prcp_fac can be quite different ...
+            #assert_allclose(prcp_facs[0], prcp_facs[1])
+
+        assert_allclose(melt_fs[1], melt_fs[2], rtol= 0.2)
+        assert_allclose(temp_bias_s[1], temp_bias_s[2], rtol= 0.2)
+
+
     def test_minimize_geodetic_via_temp_bias(self, gdir):
         from MBsandbox.help_func import (minimize_bias_geodetic_via_temp_bias)
         cfg.PARAMS['hydro_month_nh'] = 1
@@ -997,9 +1422,8 @@ class Test_geodetic_hydro1:
         grad_type = 'cte'
         N = 100
         # get the geodetic calibration data
-        url = 'https://cluster.klima.uni-bremen.de/~oggm/geodetic_ref_mb/hugonnet_2021_ds_rgi60_pergla_rates_10_20_worldwide.csv'
-        path_geodetic = utils.file_downloader(url)
-        pd_geodetic_all = pd.read_csv(path_geodetic, index_col='rgiid')
+        pd_geodetic_all = utils.get_geodetic_mb_dataframe()
+
         pd_geodetic = pd_geodetic_all.loc[pd_geodetic_all.period == '2000-01-01_2020-01-01']
         mb_geodetic = pd_geodetic.loc[gdir.rgi_id].dmdtda * 1000
 
@@ -1050,8 +1474,10 @@ class Test_geodetic_hydro1:
 
 
     def test_daily_monthly_annual_specific_mb(self, gdir):
-        # this does not work because of different days of years at the moment!!!
-        # for both ERA5 and WFDE5
+        # this test is "expected" to fail
+        # there are small differences because of different days on a year (leap years) which are differently
+        # represented inside of daily, monthly and annual specific MB at the moment!!!
+        # tested for both ERA5 and WFDE5
 
         cfg.PARAMS['hydro_month_nh'] = 1  # 0
         h, w = gdir.get_inversion_flowline_hw()

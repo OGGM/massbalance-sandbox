@@ -50,6 +50,21 @@ import theano.tensor as aet
 def get_TIModel_clim_model_type(gd, mb_type='mb_monthly', grad_type='cte',
                                 pd_geodetic_loc=None,  # pd_geodetic_comp
                                 ):
+    '''
+
+    changed it that it runs now with area in m2 input !!!
+    Parameters
+    ----------
+    gd
+    mb_type
+    grad_type
+    pd_geodetic_loc
+
+    Returns
+    -------
+
+    '''
+
     rho_geodetic = 850
 
     # get volume estimates
@@ -59,9 +74,9 @@ def get_TIModel_clim_model_type(gd, mb_type='mb_monthly', grad_type='cte',
     V_gd_m3 = dV.loc[gd.rgi_id]['vol_itmix_m3']  # m3 volume of HEF
     total_mass_gd = V_gd_m3 * rho_geodetic
     # this is the area from 2000, could use another estimate (e.g. mean between 2000 and 2020...)
-    gd_area = pd_geodetic_loc.loc[gd.rgi_id]['area']  # in km2
+    gd_area = pd_geodetic_loc.loc[gd.rgi_id]['area']  # in m2 now !!!
     # convert kg --> kg/km2
-    max_allowed_specificMB = - total_mass_gd / 1e6 / gd_area
+    max_allowed_specificMB = - total_mass_gd / gd_area
 
     h, w = gd.get_inversion_flowline_hw()
     if mb_type != 'mb_real_daily':
@@ -76,7 +91,7 @@ def get_TIModel_clim_model_type(gd, mb_type='mb_monthly', grad_type='cte',
     # at instantiation use prcp_fac = 2.5, change this in def_get_mb later on
     gd_mb = TIModel(gd, 150, mb_type=mb_type, N=100, prcp_fac=2.5,
                     grad_type=grad_type)
-    gd_mb.historical_climate_qc_mod(gd)
+    #gd_mb.historical_climate_qc_mod(gd)
 
     return gd_mb, ref_df, h, w, max_allowed_specificMB
 
@@ -221,7 +236,6 @@ def bayes_dummy_model_better(uniform,
             observed = pm.Data('observed', pd_geodetic_comp.loc[gd.rgi_id][
                 ['dmdtda_2000_2010', 'dmdtda_2010_2020']].values * 1000)
             if nosigma == False:
-
                 geodetic_massbal = pm.Normal('geodetic_massbal',
                                              mu=mb_mod,
                                              sigma=sigma,  # standard devia
@@ -235,15 +249,21 @@ def bayes_dummy_model_better(uniform,
                                                      geodetic_massbal - observed)
         else:
             # sigma and observed need to have dim 1 (not zero), --> [value]
-            sigma = pm.Data('sigma', [
-                pd_geodetic_comp.loc[gd.rgi_id]['err_dmdtda'] * 1000])
             observed = pm.Data('observed', [
                 pd_geodetic_comp.loc[gd.rgi_id]['dmdtda'] * 1000])
-            geodetic_massbal = pm.TruncatedNormal('geodetic_massbal',
-                                                  mu=mb_mod,
-                                                  sigma=sigma,  # standard devia
-                                                  observed=observed,
-                                                  lower=max_allowed_specificMB)  # likelihood
+            if nosigma == False:
+                sigma = pm.Data('sigma', [
+                    pd_geodetic_comp.loc[gd.rgi_id]['err_dmdtda'] * 1000])
+                geodetic_massbal = pm.TruncatedNormal('geodetic_massbal',
+                                                      mu=mb_mod,
+                                                      sigma=sigma,  # standard devia
+                                                      observed=observed,
+                                                      lower=max_allowed_specificMB)  # likelihood
+            else:
+                geodetic_massbal = pm.TruncatedNormal('geodetic_massbal',
+                                                      mu=mb_mod,
+                                                      observed=observed,
+                                                      lower=max_allowed_specificMB)  # likelihood
             diff_geodetic_massbal = pm.Deterministic("diff_geodetic_massbal",
                                                      geodetic_massbal - observed)
         # constrained already by using TruncatedNormal geodetic massbalance ...
@@ -372,13 +392,13 @@ def bayes_dummy_model_better_OLD(uniform,
                     pd_calib_opt.reg == 11.0].dropna().mean(),
                                         sigma=pd_calib_opt['pf_opt'][
                                             pd_calib_opt.reg == 11.0].dropna().std(),
-                                        lower=0.5, upper=10)
+                                        lower=0.1, upper=10)
                 melt_f = pm.TruncatedNormal('melt_f',
                                             mu=pd_calib_opt['melt_f_opt_pf'][
                                                 pd_calib_opt.reg == 11.0].dropna().mean(),
                                             sigma=pd_calib_opt['melt_f_opt_pf'][
                                                 pd_calib_opt.reg == 11.0].dropna().std(),
-                                            lower=1, upper=1000)
+                                            lower=10, upper=1000)
             else:
                 pass  # melt_f = melt_f
 
@@ -521,7 +541,7 @@ def bayes_dummy_model_better_OLD(uniform,
 def bayes_dummy_model_ref_std(uniform,
                               max_allowed_specificMB=None,
                               gd=None,
-                              sampler='nuts', ys=np.arange(1979, 2019, 1),
+                              sampler='nuts', ys=np.arange(1979, 2020, 1), # with var_an_cycle only works with 1980 ...
                               gd_mb=None,
                               h=None, w=None, use_two_msm=True, nosigma=False,
                               nosigmastd=False, first_ppc=True,
@@ -544,7 +564,7 @@ def bayes_dummy_model_ref_std(uniform,
                 pd_calib_opt.reg == 11.0].dropna().mean(),
                                     sigma=pd_calib_opt['pf_opt'][
                                         pd_calib_opt.reg == 11.0].dropna().std(),
-                                    lower=0.5, upper=10)
+                                    lower=0.1, upper=10)
             melt_f = pm.TruncatedNormal('melt_f',
                                         mu=pd_calib_opt['melt_f_opt_pf'][
                                             pd_calib_opt.reg == 11.0].dropna().mean(),
@@ -633,8 +653,7 @@ def bayes_dummy_model_ref_std(uniform,
         # std
         # sigma = pm.Data('sigma', 100) # how large are the uncertainties of the direct glaciological method !!!
         ref_df = gd.get_ref_mb_data(y0=y0, y1=y1)
-        sigma_std = aet.constant((ref_df[
-                                      'ANNUAL_BALANCE'].values / 10).std())  # how large are the uncertainties of the direct glaciological method !!!
+        sigma_std = aet.constant((ref_df['ANNUAL_BALANCE'].values / 10).std())  # how large are the uncertainties of the direct glaciological method !!!
         observed_std = aet.constant(ref_df['ANNUAL_BALANCE'].values.std())
 
         # std should always be above zero
@@ -659,7 +678,7 @@ def bayes_dummy_model_ref_std(uniform,
     with model_T:
         # sampling
         if sampler == 'nuts':
-            trace = pm.sample(25000, chains=3, tune=25000, target_accept=0.99,
+            trace = pm.sample(20000, chains=3, tune=20000, target_accept=0.99, # 25000
                               compute_convergence_checks=True,
                               return_inferencedata=True)
         #                 #start={'pf':2.5, 'melt_f': 200})
