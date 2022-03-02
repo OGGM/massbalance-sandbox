@@ -16,13 +16,9 @@ import pytest
 import shapely.geometry as shpg
 import matplotlib.pyplot as plt
 
-from oggm.shop import cru, histalp, ecmwf
 from oggm import cfg, tasks
-from oggm.core import flowline
-from oggm.tests.funcs import init_hef, get_test_dir
 from oggm import utils
 from oggm.utils import mkdir, _downloads
-from oggm.utils import oggm_urlretrieve
 from oggm.tests import HAS_MPL_FOR_TESTS, HAS_INTERNET
 
 logger = logging.getLogger(__name__)

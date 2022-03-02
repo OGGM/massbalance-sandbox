@@ -1063,7 +1063,8 @@ class TIModel_Parent(MassBalanceModel):
         # Read climate file
         fpath = gdir.get_filepath(filename, filesuffix=input_filesuffix)
 
-        # todo: I am using xarray instead of netCDF4, which is slower and I need change this at some point to netCDF4
+        # todo exectime:
+        #  I am using xarray instead of netCDF4, which is slower and I should change this at some point to netCDF4
         with xr.open_dataset(fpath) as xr_nc:
             if self.mb_type == 'mb_real_daily' or self.mb_type == 'mb_monthly':
                 # even if there is temp_std inside the dataset, we won't use
@@ -1646,31 +1647,28 @@ class TIModel_Parent(MassBalanceModel):
     def get_specific_winter_mb(self, heights, year=None, #begin_winter_mb=None, end_winter_mb=None,
                                widths=None, add_climate=False, period_from_wgms=False,
                                **kwargs_monthly_mb):
-        """outputs specific winter MB in kg/m2.
-        This is not yet tested and only works for northern Hemisphere with a perfect regular winter MB time series
-        (always from October 1st - April 30th) at the moment.
+        """outputs specific winter MB in kg/m2. The actual winter time period can be (at the moment) either
+        default October 1st to April 30th  or the one as observed by the WGMS
+        (different for each glacier and observation year)
 
-        This is work in process:
-        todo: allow to use variable begin_winter_mb and end_winter_mb, check if year is right, extract month time span
-         and use days to estimate the fraction of month that should be added to be able to correctly compare it to
-         seasonal observation data
         todo: copy this and create a similar get_specific_summer_mb() -
          -> and maybe a get_specific_hydro_mb() (which would be the doing first get_specific_winter_mb
          and then get_specific_summer_mb
+
         Parameters
         -------
         heights: ndarray
             the altitudes at which the mass-balance will be computed (has to be set)
         year: int
             hydro integer year, (e.g. 2020 means winter 2019/2020),  (has to be set)
-        begin_winter_mb : float or np.array
-            deprecated at the moment
-            if several years, has to be an array. Corresponds to yearmonthday of the starting day of the winter MB.
-            If perfect, should be YYYY1001 .
-        end_winter_mb : float or np.array
-            deprecated at the moment
-            if several years, has to be an array. Corresponds to yearmonthday of the end day of the winter MB.
-            If perfect, should be YYYY0430 .
+        #begin_winter_mb : float or np.array
+        #    deprecated at the moment
+        #    if several years, has to be an array. Corresponds to yearmonthday of the starting day of the winter MB.
+        #    If perfect, should be YYYY1001 .
+        #end_winter_mb : float or np.array
+        #    deprecated at the moment
+        #    if several years, has to be an array. Corresponds to yearmonthday of the end day of the winter MB.
+        #    If perfect, should be YYYY0430 .
         widths : ndarray
             widths that correspond to the given heights
             (if not given specific MB is estimated without weighting over the widths which is actually not wanted,
@@ -1680,16 +1678,19 @@ class TIModel_Parent(MassBalanceModel):
             Prcp and temp_for_melt as sum over winter months, temperature as mean.
         period_from_wgms : bool
             if we compute MB by using the same observed time periods as the WGMS does (hence: time period is different
-            for each year and glacier). Default is False (computinf instead fixed date winter MB
-            on northern Hemisphere).
+            for each year and glacier). Default is False (computing instead fixed date winter MB
+            on northern Hemisphere, always from October 1st - April 30th).
         **kwargs_monthly_mb:
             todo: do I need that?
         """
         # replace this to oggm-sample-data path and use utils.file_downloader
         if period_from_wgms:
-            pd_mb_overview = pd.read_csv(
-                '/home/lilianschuster/Schreibtisch/PhD/wgms_data_analysis/mb_overview_seasonal_mb_time_periods.csv',
-                index_col='Unnamed: 0')
+            #pd_mb_overview = pd.read_csv(
+            #    '/home/lilianschuster/Schreibtisch/PhD/wgms_data_analysis/mb_overview_seasonal_mb_time_periods.csv',
+            #    index_col='Unnamed: 0')
+            _, path = utils.get_wgms_files()
+            pd_mb_overview = pd.read_csv(path[:-len('/mbdata')]+'/mb_overview_seasonal_mb_time_periods_20220301.csv',
+                                         index_col='Unnamed: 0')
             pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == self.fl.rgi_id]
             pd_mb_overview_sel_gdir_yr = pd_mb_overview_sel_gdir.loc[pd_mb_overview_sel_gdir.Year == year]
             ### starting period
@@ -1697,7 +1698,7 @@ class TIModel_Parent(MassBalanceModel):
             d_start = pd_mb_overview_sel_gdir_yr['BEGIN_PERIOD'].astype(np.datetime64).iloc[0].day
             m_start_days_in_month = pd_mb_overview_sel_gdir_yr['BEGIN_PERIOD'].astype(np.datetime64).iloc[0].days_in_month
             # ratio of 1st month that we want to estimate?
-            # if d_start is 1 -> ratio should be 1 --> all the month should be added to the winter MB
+            # if d_start is 1 -> ratio should be 1 --> the entire month should be added to the winter MB
             ratio_m_start = 1 - (d_start-1)/m_start_days_in_month
             ### end period
             m_end = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype(np.datetime64).iloc[0].month + 1
@@ -1707,8 +1708,8 @@ class TIModel_Parent(MassBalanceModel):
             # if d_end == m_end_days_in_month, then the entire month should be used
             ratio_m_end = d_end/m_end_days_in_month
             # m_start = pd_mb_overview_sel_gdir_yr.month_BEGIN_PERIOD.unique() #.apply(lambda d: d.month)
-            #m_end = pd_mb_overview_sel_gdir_yr.month_END_WINTER.unique() + 1
-            #.apply(lambda d: d[5:7]) + 1
+            # m_end = pd_mb_overview_sel_gdir_yr.month_END_WINTER.unique() + 1
+            # .apply(lambda d: d[5:7]) + 1
 
         else:
             m_start = 10
@@ -1734,8 +1735,6 @@ class TIModel_Parent(MassBalanceModel):
                 prcp_sol_list = []
                 for k in np.arange(0, len(year), 1):
                     out_k = self.get_specific_winter_mb(heights, year=year[k],
-                                                        #begin_winter_mb=np.NaN,  # todo change this to begin_winter_mb[k],
-                                                        #end_winter_mb=np.NaN,  # todo change this toend_winter_mb[k],
                                                         widths=widths,
                                                         add_climate=add_climate,
                                                         period_from_wgms=period_from_wgms,
@@ -1749,8 +1748,6 @@ class TIModel_Parent(MassBalanceModel):
 
             else:
                 out = [self.get_specific_winter_mb(heights, year=year[k],
-                                                   #begin_winter_mb=np.NaN,  # todo change this to begin_winter_mb[k],
-                                                   #end_winter_mb=np.NaN,  # todo change this toend_winter_mb[k],
                                                    widths=widths,
                                                    add_climate=add_climate,
                                                    period_from_wgms=period_from_wgms,
@@ -1813,8 +1810,8 @@ class TIModel_Parent(MassBalanceModel):
         year corresponds to hydro "integer" year
 
         WORK IN PROCESS -> adapt it if get_specific_winter_mb is corrected the right way!
-
         """
+        raise NotImplementedError('todo: has to be copied / adapted from get_specific_winter_mb')
         m_start = 5 # start in May
         m_end = 10  # until end of September
         mbs_summer = 0
@@ -2017,7 +2014,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
 
         # doc_TIModel_Sfc_Type =
         """
-        Other terms are equal to TIModel_Parent! todo: need to inherit them here
+        Other terms are equal to TIModel_Parent!
+        todo Fabi: need to inherit them here
         The following parameters are initialized specifically only for TIModel_Sfc_Type
 
         Parameters
@@ -2068,7 +2066,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
             those keyword arguments that are equal to TIModel_Parent
             todo: or should I just brutally copy the docs from TIModel_Parent?
         """
-        # todo Fabi?: how can I best inherit the init docs from TIModel_Parent to be visible as well in TIModel_Sfc_Type
+        # todo Fabi: how can I best inherit the init docs from TIModel_Parent to be visible as well in TIModel_Sfc_Type
         #self.__init__.__doc__ = super().__init__.__doc__ + doc_TIModel_Sfc_Type
 
         super().__init__(gdir, melt_f, **kwargs)
@@ -2177,8 +2175,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # interpolate from snow melt_f to ice melt_f by using melt_f_ratio_snow_to_ice and tau_e_fold_yr
         # to get the bucket melt_f. Need to do this here and not in init, because otherwise it does not get updated.
 
-        # todo: exectime --> need to make that more efficient, only "update" melt_f_buckets and recompute them if melt_f
-        #  is changed (melt_f_ratio_snow<_to_ice, tau_e_fold_yr and amount of buckets do not change after instantiation!!
+        # comment exectime: made that more efficient. Now it only "updates" melt_f_buckets and recomputes them if melt_f
+        # is changed (melt_f_ratio_snow<_to_ice, tau_e_fold_yr and amount of buckets do not change after instantiation)!
         if self.melt_f_change == 'linear':
             self._melt_f_buckets = dict(zip(self.buckets + ['ice'],
                                             np.linspace(self._melt_f * self.melt_f_ratio_snow_to_ice,
@@ -2199,7 +2197,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         (basically removes all years/months and empties the buckets so that everything is as if freshly instantiated)
         It is called when setting new melt_f, prcp_fac, temp_bias, ...
         """
-        # TODO: do I need to reset sometimes only the buckets,
+        # comment: do I need to reset sometimes only the buckets,
         #  or only mb_monthly??? -> for the moment I don't think so
         if self.interpolation_optim:
             self._pd_mb_template_bucket = pd.DataFrame(0, index=self.hbins[::-1],
@@ -2247,7 +2245,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
          new mass change for each bucket
 
          this is probably where most computational time is needed
-         todo: make this faster!!!
 
          Parameters
          ----
@@ -2286,6 +2283,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         #  length of the heights are the same as distance along
         #  flowline of pd_bucket dataframe
         #  but the commented check is not feasible as it does not work for all circumstances
+        #  however, we check at other points if the height array has at least the right order!
         # if len(heights) != len(self.fl.dis_on_line):
         #    raise InvalidParamsError('length of the heights should be the same as '
         #                             'distance along flowline of pd_bucket dataframe,'
@@ -2307,7 +2305,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         condi3 = climate_resol == 'monthly' and self.melt_f_update == 'annual' and mc == 1
         if condi1 or condi2 or condi3:
             # if not np.any(self.pd_bucket[self.first_snow_bucket] == 0):
-            # todo : exectime --> made this faster (similar as in ...)
+            # comment exectime: this code here below is faster than the one from above
             np_pd_values_first_snow_bucket = np_pd_bucket[:, 0]  # -> corresponds to first_snow_bucket
             # todo exectime : this still takes long to evaluate !!! is there a betterway ???
             if len(np_pd_values_first_snow_bucket[np_pd_values_first_snow_bucket != 0]) > 0:
@@ -2371,33 +2369,29 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # this can actually be done outside the for-loop!!!
 
         # just get the melt_f_buckets once
-        # todo: could maybe directly only accept changes in self.melt_f_buckets if melt_f_buckets change ...
-        # exectime: this is still quite expensive!!!
         melt_f_buckets = self.melt_f_buckets
         # do not include delta_kg/m2 in pd_buckets, and also do not include melt_f of 'ice'
-        # todo: exectime this line is also quite expensive (Number 4, e.g. 3.4% of computing time)-> rewrite to numpy?
         tfm_to_melt_b = np_pd_bucket[:, :-1] / (np.array(list(melt_f_buckets.values()))[:-1]*fact)  # in K
         # need to transpose it to have the right shape
         tfm_to_melt_b = tfm_to_melt_b.T
 
-        # todo: exectime , can I use another kind of loop -> e.g. "apply" or sth.?
+        ### loop:
+        # todo Fabi: exectime , can I use another kind of loop -> e.g. "apply" or sth.?
         #  maybe I can convert this first into a np.array then do the loop there and reconvert it at the end
         #  again into a pd.DataFrame for better handling?
 
-
         # faster: (old pandas code commented below)
         np_delta_kg_m2 = np_pd_bucket[:, -1]
-        # always when I call self.melt_f_buckets it recompute the melt_f_buckets this is bad!!!
         for e, b in enumerate(self.buckets):
             # there is no ice bucket !!!
 
             # now recompute buckets mass:
             # kg/m2 of that bucket that is not lost (that has not melted) in that year / month (i.e. what will
-            # stay in that bucket after that month/year -> and gets later on eventually updated ->older)
+            # stay in that bucket after that month/year -> and gets later on eventually updated -> older)
             # if all lost -> set it to 0
             # -> to get this need to reconvert the tfm energy unit into kg/m2 by using the right melt_factor
             # e.g. at the uppest layers there is new snow added ...
-            # todo: exectime now one of slowest lines (e.g. ~8% of computational time)
+            # todo Fabi: exectime now one of slowest lines (e.g. ~8% of computational time)
             not_lost_bucket = utils.clip_min(tfm_to_melt_b[e] - remaining_tfm, 0) * melt_f_buckets[b] * fact
 
             # if all of the bucket is removed (not_lost_bucket=0), how much energy (i.e. tfm) is left
@@ -2444,9 +2438,11 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # use the np.array and recompute delta_kg_m2
         np_pd_bucket[:, -1] = np_delta_kg_m2 -remaining_tfm * melt_f_buckets['ice'] * fact
         # create pd_bucket again at the end
-        # todo: exectime -> this is also now quite time expensive (~8-13%)
+        # todo Fabi: exectime -> this is also now quite time expensive (~8-13%)
         #  but on the other hand, it takes a lot of time to
-        #  create a bucket system without pandas at all =!
+        #  create a bucket system without pandas at all !
+        #  if we would always stay in the self.pd_bucket.values system instead of np_pd_bucket,
+        #  we would not need to recreate the pd_bucket, maybe this would be then faster?
         self.pd_bucket = pd.DataFrame(np_pd_bucket, columns=self.pd_bucket.columns.values,
                                       index=self.pd_bucket.index)
         if add_climate:
@@ -2466,7 +2462,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
         #         # if all lost -> set it to 0
         #         # -> to get this need to reconvert the tfm energy unit into kg/m2 by using the right melt_factor
         #         # e.g. at the uppest layers there is new snow added ...
-        #         # todo: exectime this line is also quite expensive (Number 3, e.g. 7% of computing time)-> rewrite to numpy?
         #         not_lost_bucket = utils.clip_min(tfm_to_melt_b[e] - remaining_tfm, 0) * self.melt_f_buckets[b] * fact
         #
         #         # if all of the bucket is removed (not_lost_bucket=0), how much energy (i.e. tfm) is left
@@ -2477,15 +2472,11 @@ class TIModel_Sfc_Type(TIModel_Parent):
         #         # find sth. faster
         #
         #         # in case of ice, the remaining_tfm is only used to update once again delta_kg/m2
-        #         # todo : exectime time Fabi check if I can merge not_lost_bucket and remaining_tfm computation
-        #         #  (so that we don't do the clip_min twice)?
-        #         #  or maybe I should only compute that if not_lost_bucket == 0:
         #
         #         # amount of kg/m2 lost in this bucket -> this will be added to delta_kg/m2
         #         # corresponds to: not yet updated total bucket - amount of not lost mass of that bucket
-        #         # todo: the line is very expensive (Number 1, e.g. 22% of computing time)-> rewrite to numpy?
+        #         # comment: this line was very expensive (Number 1, e.g. 22% of computing time)-> rewrite to numpy?
         #         # self.pd_bucket['delta_kg/m2'] += not_lost_bucket - self.pd_bucket[b].values # .copy(), not necessary because minus
-        #         # todo: exectime -> is this faster:
         #         self.pd_bucket['delta_kg/m2'] = (self.pd_bucket['delta_kg/m2'].values
         #                                          + not_lost_bucket - self.pd_bucket[
         #                                              b].values)  # .copy(), not necessary because minus
@@ -2494,7 +2485,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         #         # self.pd_bucket['delta_kg/m2'] = not_lost_bucket - self.pd_bucket[b].values # .copy(), not necessary because minus
         #
         #         # update pd_bucket with what has not melted from the bucket
-        #         # todo: exectime this line is very expensive (Number 2, e.g. 11% of computing time)->
+        #         # comment: exectime this line was very expensive (Number 2, e.g. 11% of computing time)->
         #         # how can we make this faster?
         #         self.pd_bucket[b] = not_lost_bucket
         #
@@ -2524,7 +2515,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         one bucket older, then set the first_snow_bucket to 0, and the set pd_bucket[kg/m2] to np.NaN
         just want to shift all buckets from one column to another one .> can do all at once via self.buckets[::-1].iloc[1:] ???
         """
-        # first conver pd_bucket to np dataframe -> at the end reconvert to pd.DataFrame
+        # first convert pd_bucket to np dataframe -> at the end reconvert to pd.DataFrame
         np_pd_bucket = self.pd_bucket.values
 
         # this here took sometimes 1.1%
@@ -2558,10 +2549,14 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # went into the next older bucket and so on!!!
 
         # recreate pd_bucket:
-        # todo exectime: if we want to save more time would need to restructure all -> slowest line
+        # todo Fabi exectime: if we want to save more time would need to restructure all -> slowest line
         #  (9-12% computational time)
+        #  if we would always stay in the self.pd_bucket.values system instead of np_pd_bucket,
+        #  we would not need to recreate the pd_bucket, maybe this would be then faster?
         self.pd_bucket = pd.DataFrame(np_updated_bucket, columns=self.pd_bucket.columns.values,
                                       index=self.pd_bucket.index)
+        return self.pd_bucket
+
         # OLD stuff
         # other idea -> but did not work!
         # just rename the columns : and add afterwards the snow bucket inside
@@ -2575,7 +2570,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
 
         # self.pd_bucket[self.first_snow_bucket] = 0
         # self.pd_bucket['delta_kg/m2'] = np.NaN
-        return self.pd_bucket
 
         # the new version should work as the old version (e.g. this test here should check it: test_sfc_type_update)
         # the other loop version will be removed
@@ -2729,7 +2723,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
                 # update to one year later ... (i.e. put the snow / firn into the next older bucket)
                 self._update()
                 # save the annual mb
-                # todo: exectime --> would need to restructure code to remove pd stuff
+                # todo Fabi exectime: --> would need to restructure code to remove pd stuff
                 self.pd_mb_annual[year] = mb_annual
                 # this is done already if melt_f_update is monthly (see get_monthly_mb for m == 12)
             elif self.melt_f_update == 'monthly':
@@ -2926,7 +2920,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
             # need to flatten for mb_pseudo_daily otherwise it gives the wrong shape
             mb_month = mb_month.flatten() / self.SEC_IN_MONTH / self.rho
             # save the mass-balance to pd_mb_monthly
-            # todo: exectime -> this line is also quite expensive -> to make it faster would need
+            # todo Fabi exectime: -> this line is also quite expensive -> to make it faster would need
             #  to entirely remove the pd_structure!
             self.pd_mb_monthly[year] = mb_month
             self.pd_mb_monthly[year] = mb_month
@@ -2939,8 +2933,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
                 # todo: maybe better to set a NotImplementedError
                 # raise NotImplementedError('get_monthly_mb works at the moment '
                 #                          'only when melt_f is updated monthly')
-                # for annual melt_f_update, this is a bit tricky because the
-                # _update should only be done after a full year
 
                 # if annual, only want to update at the end of the year
                 if m == 12:
