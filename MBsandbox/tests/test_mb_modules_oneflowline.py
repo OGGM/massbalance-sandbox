@@ -36,6 +36,7 @@ from MBsandbox.help_func import (compute_stat, minimize_bias,
                                  optimize_std_quot_brentq,
                                  melt_f_calib_geod_prep_inversion,
                                  minimize_winter_mb_brentq_geod_via_pf,
+                                 calibrate_to_geodetic_bias_winter_mb,
                                  optimize_std_quot_brentq_via_temp_b_w_min_winter_geod_bias)
 
 from MBsandbox.mbmod_daily_oneflowline import (process_era5_daily_data,
@@ -853,7 +854,11 @@ class Test_geodetic_sfc_type:
         if mb_type != 'mb_real_daily':
             assert np.shape(temp_avg_2d_clim) == (len(h), 12*31)
 
-    def test_specific_winter_mb(self, gdir, gdir_aletsch):
+
+    @pytest.mark.parametrize('mb_type', ['mb_pseudo_daily',
+                                         'mb_real_daily', 'mb_monthly',
+                                         ])
+    def test_specific_winter_mb_no_sfc_type(self, gdir, gdir_aletsch, mb_type):
 
         _, path = utils.get_wgms_files()
         pd_mb_overview = pd.read_csv(path[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
@@ -877,13 +882,251 @@ class Test_geodetic_sfc_type:
         pf = 2  # precipitation factor
         h, w = gdir.get_inversion_flowline_hw()
         h_aletsch, w_aletsch = gdir_aletsch.get_inversion_flowline_hw()
-        mb_type = 'mb_monthly'
 
         baseline_climate = 'W5E5'
         if mb_type != 'mb_real_daily':
             temporal_resol = 'monthly'
+            input_fs = '_monthly_W5E5'
         else:
             temporal_resol = 'daily'
+            input_fs = '_daily_W5E5'
+        workflow.execute_entity_task(process_w5e5_data, [gdir, gdir_aletsch],
+                                     temporal_resol=temporal_resol,
+                                     climate_type=baseline_climate,
+                                     )
+
+        # those two should be equal!!!
+        mb_mod = TIModel(gdir, melt_f, mb_type=mb_type,
+                                  prcp_fac=pf,
+                                  baseline_climate=baseline_climate)
+        mb_mod_aletsch = TIModel(gdir_aletsch, melt_f, mb_type=mb_type,
+                                          prcp_fac=pf,
+                                          baseline_climate=baseline_climate)
+
+        # in case of HEF this should be the same !!! (as HEF always has WGMS seasonal MB from Oct 1st to April 30th)
+        out_w_period_from_wgms = mb_mod.get_specific_winter_mb(heights=h, year=pd_mb_overview_sel_gdir_years, widths=w,
+                                                               add_climate=True,
+                                                               period_from_wgms=True)
+        for c in out_w_period_from_wgms[1:]:
+            assert np.shape(c) == (7, len(h))
+        # is the climate in the right shape (should have 1D and length of h)
+
+        out_w_default_period = mb_mod.get_specific_winter_mb(heights=h, year=pd_mb_overview_sel_gdir_years, widths=w,
+                                                             add_climate=True,
+                                                             period_from_wgms=False)
+        for k, _ in enumerate(out_w_default_period):
+            np.testing.assert_allclose(out_w_default_period[k],
+                                       out_w_period_from_wgms[k])
+
+        # in case of Aletsch glacier they should not be equal:
+        # no precomputation necessary for TIModel (without sfc type distinction)
+        mb_mod_aletsch.get_specific_mb(heights=h_aletsch, widths=w_aletsch,
+                                       year=np.arange(pd_mb_overview_sel_gdir_years_aletsch[0],
+                                                      pd_mb_overview_sel_gdir_years_aletsch[-1] + 1, 1))
+        out_w_period_from_wgms_aletsch = mb_mod_aletsch.get_specific_winter_mb(heights=h_aletsch,
+                                                                               year=pd_mb_overview_sel_gdir_years_aletsch,
+                                                                               widths=w_aletsch,
+                                                                               add_climate=True,
+                                                                               period_from_wgms=True)
+        out_w_default_period_aletsch = mb_mod_aletsch.get_specific_winter_mb(heights=h_aletsch,
+                                                                             year=pd_mb_overview_sel_gdir_years_aletsch,
+                                                                             widths=w_aletsch,
+                                                                             add_climate=True,
+                                                                             period_from_wgms=False)
+        # specific winter mb can be different but not too much!
+        np.testing.assert_allclose(out_w_period_from_wgms_aletsch[0],
+                                   out_w_default_period_aletsch[0], rtol=0.5)
+        # actually differences up to rtol=0.33!!!
+        for e, y in enumerate(pd_mb_overview_sel_gdir_aletsch.Year):
+            # if the actual WGMS period is longer than the default Oct1st - Apr30 period, at least precipitation
+            # should be more!
+            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype(np.datetime64)[y].month < 10
+            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype(np.datetime64)[y].month > 4
+            if condi_m_e and condi_m_s:
+                ### all those that are always above zero and are summed up should be larger:
+                # tfm (here it can also be equal)
+                assert np.all(out_w_period_from_wgms_aletsch[-3][e] >= out_w_default_period_aletsch[-3][e])
+                # liquid prcp
+                assert np.all(out_w_period_from_wgms_aletsch[-2][e] > out_w_default_period_aletsch[-2][e])
+                # solid prcp
+                assert np.all(out_w_period_from_wgms_aletsch[-1][e] >= out_w_default_period_aletsch[-1][e])
+
+            # if the actual WGMS period is short than the default Oct1st - Apr30 period, at least precipitation
+            # should be smaller!
+            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype(np.datetime64)[y].month >= 10
+            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype(np.datetime64)[y].month <= 4
+            if condi_m_e and condi_m_s:
+                ### all those that are always above zero and are summed up should be larger:
+                # tfm (here it can also be equal)
+                assert np.all(out_w_period_from_wgms_aletsch[-3][e] <= out_w_default_period_aletsch[-3][e])
+                # liquid prcp
+                assert np.all(out_w_period_from_wgms_aletsch[-2][e] > out_w_default_period_aletsch[-2][e])
+                # solid prcp
+                assert np.all(out_w_period_from_wgms_aletsch[-1][e] <= out_w_default_period_aletsch[-1][e])
+
+        # let's calibrate the model to match winter MB bias and check if it worked
+        # we only do it for Aletsch glacier here (there it is more complicated and more prone to errors)
+        pd_geodetic_all = oggm.utils.get_geodetic_mb_dataframe()
+        pd_geodetic = pd_geodetic_all.loc[pd_geodetic_all.period == '2000-01-01_2020-01-01']
+        mb_geodetic = pd_geodetic.loc[gdir_aletsch.rgi_id].dmdtda * 1000
+        pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
+        pd_mb_overview_sel_gdir.index = pd_mb_overview_sel_gdir.Year
+        yrs_seasonal_mbs = pd_mb_overview_sel_gdir.Year.values
+        assert np.all(yrs_seasonal_mbs >= 1980)
+        assert np.all(yrs_seasonal_mbs < 2020)
+        # yrs_seasonal_mbs = gdir.get_ref_mb_data(input_filesuffix=input_fs)['SUMMER_BALANCE'].dropna().index.values
+        # yrs_seasonal_mbs = yrs_seasonal_mbs[(yrs_seasonal_mbs >= 1980) & (yrs_seasonal_mbs < 2020)] # I can't use 1979 (as then we would need climate data in winter 1978!)
+        winter_mb_observed = gdir_aletsch.get_ref_mb_data(input_filesuffix=input_fs)
+        winter_mb_observed = winter_mb_observed.loc[pd_mb_overview_sel_gdir_years_aletsch]['WINTER_BALANCE']
+        try:
+            pf_opt = scipy.optimize.brentq(minimize_winter_mb_brentq_geod_via_pf, 0.1, 5, xtol=0.1,
+                                           args=(mb_mod_aletsch, mb_geodetic, winter_mb_observed,
+                                                 h_aletsch, w_aletsch, pd_mb_overview_sel_gdir_years_aletsch,
+                                                 True)  # period_from_wgms
+                                           )
+        except:
+            melt_f_opt_dict = {}
+            for pf in np.concatenate([np.arange(0.1, 3, 0.5), np.arange(3, 10, 2)]):
+                try:
+                    melt_f = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
+                                                   xtol=0.01,
+                                                   args=(mb_mod_aletsch, mb_geodetic,
+                                                         h_aletsch, w_aletsch, pf),
+                                                   disp=True)
+                    melt_f_opt_dict[pf] = melt_f
+                except:
+                    pass
+            pf_start = list(melt_f_opt_dict.items())[0][0]
+            pf_end = list(melt_f_opt_dict.items())[-1][0]
+
+            pf_opt = scipy.optimize.brentq(minimize_winter_mb_brentq_geod_via_pf, pf_start, pf_end, xtol=0.1,
+                                           args=(mb_mod_aletsch, mb_geodetic, winter_mb_observed,
+                                                 h_aletsch, w_aletsch, pd_mb_overview_sel_gdir_years_aletsch,
+                                                 True)  # period_from_wgms
+                                           )
+
+        mb_mod_aletsch.prcp_fac = pf_opt
+        melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
+                                                      xtol=0.01,
+                                                      args=(mb_mod_aletsch, mb_geodetic,
+                                                            h_aletsch, w_aletsch, pf_opt),
+                                                      disp=True)
+        mb_mod_aletsch.melt_f = melt_f_opt
+
+        # first precompute it (like that also years in between (without observations) are estimated)
+        # [only important for TIModel_Sfc_Type, if observations have missing years in between]
+
+        mb_mod_aletsch.get_specific_mb(heights=h_aletsch, widths=w_aletsch,
+                                       year=np.arange(pd_mb_overview_sel_gdir_years_aletsch[0],
+                                                      pd_mb_overview_sel_gdir_years_aletsch[-1] + 1, 1))
+        outi_right_period = mb_mod_aletsch.get_specific_winter_mb(heights=h_aletsch,
+                                                                  year=pd_mb_overview_sel_gdir_years_aletsch,
+                                                                  widths=w_aletsch,
+                                                                  add_climate=True,
+                                                                  period_from_wgms=True)
+        # observed and modelled winter mb bias should be similar now (as prcp-fac was calibrated to match it!)
+        np.testing.assert_allclose(outi_right_period[0].mean(),
+                                   winter_mb_observed.mean(), rtol=0.01)
+
+        # dividing through pf at the end should be sufficient and it should give
+        # the same results as first changing prcp_fac and then reestimating winter prcp
+        prpc_no_pf_by_division_at_end = outi_right_period[3] / mb_mod_aletsch.prcp_fac
+
+        mb_mod_aletsch.prcp_fac = 1
+        mb_mod_aletsch.get_specific_mb(heights=h_aletsch, widths=w_aletsch,
+                                       year=np.arange(pd_mb_overview_sel_gdir_years_aletsch[0],
+                                                      pd_mb_overview_sel_gdir_years_aletsch[-1] + 1, 1))
+        outi_right_period_no_pf = mb_mod_aletsch.get_specific_winter_mb(heights=h_aletsch,
+                                                                        year=pd_mb_overview_sel_gdir_years_aletsch,
+                                                                        widths=w_aletsch,
+                                                                        add_climate=True,
+                                                                        period_from_wgms=True)
+        prpc_no_pf_by_division_at_beginning = outi_right_period_no_pf[3]
+        # ok, as already assumed we can also just divide at the end to get the winter prcp that is "independent" of
+        # prcp. factor!!!
+        np.testing.assert_allclose(prpc_no_pf_by_division_at_end, prpc_no_pf_by_division_at_beginning)
+
+        # test if the calibrate_geod_bias_winter_mb works
+        # (shoould give the same melt_f, prcp bias as manually done above)
+        out = calibrate_to_geodetic_bias_winter_mb(gdir_aletsch, method='pre-check', temp_bias=0,
+                                                   mb_type=mb_type,
+                                                   grad_type='cte',
+                                                   sfc_type_distinction=False)
+        # pf_opt = out[0]
+        np.testing.assert_allclose(out[0], pf_opt, rtol=0.05)
+        np.testing.assert_allclose(out[1], melt_f_opt, rtol=0.05)
+
+    #@pytest.mark.slow
+    @pytest.mark.parametrize('mb_type', ['mb_pseudo_daily'])#'mb_real_daily', 'mb_monthly',#])
+    def test_specific_winter_mb_sfc_type_optim_temp_b(self, gdir, gdir_aletsch, mb_type):
+
+        from MBsandbox.help_func import calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast
+        baseline_climate = 'W5E5'
+        if mb_type != 'mb_real_daily':
+            temporal_resol = 'monthly'
+            input_fs = '_monthly_W5E5'
+        else:
+            temporal_resol = 'daily'
+            input_fs = '_daily_W5E5'
+
+        workflow.execute_entity_task(process_w5e5_data, [gdir, gdir_aletsch],
+                                     temporal_resol='monthly',
+                                     climate_type=baseline_climate,
+                                     )
+        workflow.execute_entity_task(process_w5e5_data, [gdir, gdir_aletsch],
+                                     temporal_resol='daily',
+                                     climate_type=baseline_climate,
+                                     )
+        import time
+        start = time.time()
+        pd_calib = calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir_aletsch,
+                                                                  temp_b_range=np.arange(-4, 4.1, 2),
+                                                                  # np.arange(-6,6.1,0.5)
+                                                                  method='pre-check', melt_f_update='monthly',
+                                                                  sfc_type_distinction=False,
+                                                                  path='return')
+        end = time.time()
+        print(end-start)
+        # np.testing.assert_allclose(pd_calib.quot_std, 1, rtol = 0.1)
+
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize('mb_type', ['mb_pseudo_daily',
+                                         'mb_real_daily',  'mb_monthly',
+                                          ])
+    def test_specific_winter_mb_sfc_type(self, gdir, gdir_aletsch, mb_type):
+
+        _, path = utils.get_wgms_files()
+        pd_mb_overview = pd.read_csv(path[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
+                                     index_col='Unnamed: 0')
+        pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
+        pd_mb_overview_sel_gdir.index = pd_mb_overview_sel_gdir.Year
+        assert np.all(pd_mb_overview_sel_gdir.day_BEGIN_PERIOD == 1)
+        assert np.all(pd_mb_overview_sel_gdir.month_BEGIN_PERIOD == 10)
+        assert np.all(pd_mb_overview_sel_gdir.month_END_WINTER == 4)
+        assert np.all(pd_mb_overview_sel_gdir.day_END_WINTER == 30)
+        pd_mb_overview_sel_gdir_years = pd_mb_overview_sel_gdir.Year.values
+
+        pd_mb_overview_sel_gdir_aletsch = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir_aletsch.rgi_id]
+        pd_mb_overview_sel_gdir_aletsch.index = pd_mb_overview_sel_gdir_aletsch.Year
+
+        pd_mb_overview_sel_gdir_years_aletsch = pd_mb_overview_sel_gdir_aletsch.Year.values
+
+        cfg.PARAMS['hydro_month_nh'] = 1
+        # just choose any random melt_f
+        melt_f = 200
+        pf = 2  # precipitation factor
+        h, w = gdir.get_inversion_flowline_hw()
+        h_aletsch, w_aletsch = gdir_aletsch.get_inversion_flowline_hw()
+
+        baseline_climate = 'W5E5'
+        if mb_type != 'mb_real_daily':
+            temporal_resol = 'monthly'
+            input_fs = '_monthly_W5E5'
+        else:
+            temporal_resol = 'daily'
+            input_fs = '_daily_W5E5'
+
         workflow.execute_entity_task(process_w5e5_data, [gdir, gdir_aletsch],
                                      temporal_resol=temporal_resol,
                                      climate_type=baseline_climate,
@@ -905,6 +1148,10 @@ class Test_geodetic_sfc_type:
         out_w_period_from_wgms = mb_mod.get_specific_winter_mb(heights=h, year=pd_mb_overview_sel_gdir_years, widths=w,
                                                                add_climate=True,
                                                                period_from_wgms=True)
+        for c in out_w_period_from_wgms[1:]:
+            assert np.shape(c) == (7, len(h))
+        # is the climate in the right shape (should have 1D and length of h)
+
         out_w_default_period = mb_mod.get_specific_winter_mb(heights=h, year=pd_mb_overview_sel_gdir_years, widths=w,
                                                              add_climate=True,
                                                              period_from_wgms=False)
@@ -970,7 +1217,7 @@ class Test_geodetic_sfc_type:
         assert np.all(yrs_seasonal_mbs < 2020)
         # yrs_seasonal_mbs = gdir.get_ref_mb_data(input_filesuffix=input_fs)['SUMMER_BALANCE'].dropna().index.values
         # yrs_seasonal_mbs = yrs_seasonal_mbs[(yrs_seasonal_mbs >= 1980) & (yrs_seasonal_mbs < 2020)] # I can't use 1979 (as then we would need climate data in winter 1978!)
-        winter_mb_observed = gdir_aletsch.get_ref_mb_data(input_filesuffix='_monthly_W5E5')
+        winter_mb_observed = gdir_aletsch.get_ref_mb_data(input_filesuffix=input_fs)
         winter_mb_observed = winter_mb_observed.loc[pd_mb_overview_sel_gdir_years_aletsch]['WINTER_BALANCE']
         try:
             pf_opt = scipy.optimize.brentq(minimize_winter_mb_brentq_geod_via_pf, 0.1, 5, xtol=0.1,
@@ -999,12 +1246,13 @@ class Test_geodetic_sfc_type:
                                                  True)  # period_from_wgms
                                            )
 
-        mb_mod_aletsch.pf_opt = pf_opt
-        mb_mod_aletsch.melt_f = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
+        mb_mod_aletsch.prcp_fac = pf_opt
+        melt_f_opt = scipy.optimize.brentq(minimize_bias_geodetic, 10, 1000,
                                                       xtol=0.01,
                                                       args=(mb_mod_aletsch, mb_geodetic,
                                                             h_aletsch, w_aletsch, pf_opt),
                                                       disp=True)
+        mb_mod_aletsch.melt_f = melt_f_opt
 
         # first precompute it (like that also years in between (without observations) are estimated)
         # [only important for TIModel_Sfc_Type, if observations have missing years in between]
@@ -1019,8 +1267,35 @@ class Test_geodetic_sfc_type:
                                                                   period_from_wgms=True)
         # observed and modelled winter mb bias should be similar now (as prcp-fac was calibrated to match it!)
         np.testing.assert_allclose(outi_right_period[0].mean(),
-                                   winter_mb_observed.mean(), rtol=0.05)
+                                   winter_mb_observed.mean(), rtol=0.01)
 
+        # dividing through pf at the end should be sufficient and it should give
+        # the same results as first changing prcp_fac and then reestimating winter prcp
+        prpc_no_pf_by_division_at_end = outi_right_period[3]/mb_mod_aletsch.prcp_fac
+
+        mb_mod_aletsch.prcp_fac = 1
+        mb_mod_aletsch.get_specific_mb(heights=h_aletsch, widths=w_aletsch,
+                                       year=np.arange(pd_mb_overview_sel_gdir_years_aletsch[0],
+                                                      pd_mb_overview_sel_gdir_years_aletsch[-1] + 1, 1))
+        outi_right_period_no_pf = mb_mod_aletsch.get_specific_winter_mb(heights=h_aletsch,
+                                                                  year=pd_mb_overview_sel_gdir_years_aletsch,
+                                                                  widths=w_aletsch,
+                                                                  add_climate=True,
+                                                                  period_from_wgms=True)
+        prpc_no_pf_by_division_at_beginning = outi_right_period_no_pf[3]
+        # ok, as already assumed we can also just divide at the end to get the winter prcp that is "independent" of
+        # prcp. factor!!!
+        np.testing.assert_allclose(prpc_no_pf_by_division_at_end, prpc_no_pf_by_division_at_beginning)
+
+        # test if the calibrate_geod_bias_winter_mb works
+        # (shoould give the same melt_f, prcp bias as manually done above)
+        out = calibrate_to_geodetic_bias_winter_mb(gdir_aletsch, method='pre-check', temp_bias=0,
+                                                   mb_type=mb_type,
+                                                   grad_type='cte',
+                                                   sfc_type_distinction=True)
+        # pf_opt = out[0]
+        np.testing.assert_allclose(out[0], pf_opt, rtol=0.05)
+        np.testing.assert_allclose(out[1], melt_f_opt, rtol=0.05)
 
         ### 3-step calibration -> this is WIP -> not working at the moment!!!
         # fs = '_monthly_W5E5'

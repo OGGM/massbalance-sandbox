@@ -1021,6 +1021,9 @@ class TIModel_Parent(MassBalanceModel):
         # This is necessary for automated ELA search.
         self.valid_bounds = [-1e4, 2e4]
 
+        # only have one flowline when using elevation bands
+        self.fl = gdir.read_pickle('inversion_flowlines')[-1]
+
         # check if the right climate is used for the right mb_type
         if baseline_climate == None:
             try:
@@ -1467,6 +1470,7 @@ class TIModel_Parent(MassBalanceModel):
 
             # temp_for_melt is computed separately depending on mb_type
             tempformelt = self._get_tempformelt(temp, pok)
+
             prcp = np.ones(npix) * iprcp
             fac = 1 - (temp - self.t_solid) / (self.t_liq - self.t_solid)
             prcpsol = prcp * clip_array(fac, 0, 1)
@@ -1685,9 +1689,6 @@ class TIModel_Parent(MassBalanceModel):
         """
         # replace this to oggm-sample-data path and use utils.file_downloader
         if period_from_wgms:
-            #pd_mb_overview = pd.read_csv(
-            #    '/home/lilianschuster/Schreibtisch/PhD/wgms_data_analysis/mb_overview_seasonal_mb_time_periods.csv',
-            #    index_col='Unnamed: 0')
             _, path = utils.get_wgms_files()
             pd_mb_overview = pd.read_csv(path[:-len('/mbdata')]+'/mb_overview_seasonal_mb_time_periods_20220301.csv',
                                          index_col='Unnamed: 0')
@@ -1707,9 +1708,6 @@ class TIModel_Parent(MassBalanceModel):
             # ratio of last month that we want to estimate?
             # if d_end == m_end_days_in_month, then the entire month should be used
             ratio_m_end = d_end/m_end_days_in_month
-            # m_start = pd_mb_overview_sel_gdir_yr.month_BEGIN_PERIOD.unique() #.apply(lambda d: d.month)
-            # m_end = pd_mb_overview_sel_gdir_yr.month_END_WINTER.unique() + 1
-            # .apply(lambda d: d[5:7]) + 1
 
         else:
             m_start = 10
@@ -1864,9 +1862,9 @@ class TIModel(TIModel_Parent):
 
             mb_month = np.sum(mb_daily, axis=1)
             # more correct than using a mean value for days in a month
-            warnings.warn('there might be a problem with SEC_IN_MONTH'
-                          'as February changes amount of days inbetween the years'
-                          ' see test_monthly_glacier_massbalance()')
+            #warnings.warn('there might be a problem with SEC_IN_MONTH'
+            #              'as February changes amount of days inbetween the years'
+            #              ' see test_monthly_glacier_massbalance()')
         else:
             # get 1D values for each height, no dependency on days
             t, temp2dformelt, prcp, prcpsol = self.get_monthly_climate(heights, year=year)
@@ -1885,6 +1883,8 @@ class TIModel(TIModel_Parent):
                 prcpsol = prcpsol.sum(axis=1)
                 t = t.mean(axis=1)
                 temp2dformelt = temp2dformelt.sum(axis=1)
+            if self.mb_type == 'mb_pseudo_daily':
+                temp2dformelt = temp2dformelt.flatten()
             return (mb_month / SEC_IN_MONTH / self.rho, t, temp2dformelt,
                     prcp, prcpsol)
         # instead of SEC_IN_MONTH, use instead len(prcpsol.T)==daysinmonth
@@ -1992,7 +1992,6 @@ class TIModel(TIModel_Parent):
         assert len(spec_mb) > 360
         return spec_mb
 
-
 class TIModel_Sfc_Type(TIModel_Parent):
     """ Temperature-Index model with surface type distinction using a bucket system
     (child class of TIModel_Parent)
@@ -2077,6 +2076,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         self.tau_e_fold_yr = tau_e_fold_yr
         assert tau_e_fold_yr > 0, "tau_e_fold_yr has to be above zero!"
         self.melt_f_change = melt_f_change
+        assert melt_f_change in ['linear', 'neg_exp'], "melt_f_change has to be either 'linear' or 'neg_exp'"
         # ratio of snow melt_f to ice melt_f
         self.melt_f_ratio_snow_to_ice = melt_f_ratio_snow_to_ice
         self.melt_f_update = melt_f_update
@@ -2099,8 +2099,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # comment: I don't need an ice bucket because this is assumed to be "infinite"
         # (instead just have a 'delta_kg/m2' bucket)
 
-        # only have one flowline when using elevation bands
-        self.fl = gdir.read_pickle('inversion_flowlines')[-1]
         # save the inversion height to later check if the same height is applied!!!
         self.inv_heights = self.fl.surface_h
         self.check_availability = check_availability
@@ -2189,7 +2187,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
                                             self._melt_f +
                                             (melt_f_snow - self._melt_f) * np.exp(-time/self.tau_e_fold_yr)
                                             ))
-
 
     def reset_pd_mb_bucket(self,
                            init_model_fls='use_inversion_flowline'):
@@ -2830,6 +2827,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
                     raise InvalidWorkflowError('year should be a float with monthly climate resolution')
                 # year is here float year, so it corresponds to 1 month of a specific year
                 t, temp2dformelt, prcp, prcpsol = self.get_monthly_climate(heights, year)
+                if self.mb_type == 'mb_pseudo_daily':
+                    temp2dformelt = temp2dformelt.flatten()
                 return mb_month, t, temp2dformelt, prcp, prcpsol
             else:
                 return mb_month
@@ -2978,6 +2977,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
                         self.pd_mb_annual[int(year)] = self.pd_mb_monthly.loc[:, condi].mean(axis=1).values
 
             if add_climate and not bucket_output:
+                if self.mb_type == 'mb_pseudo_daily':
+                    temp2dformelt = temp2dformelt.flatten()
                 return mb_month, t, temp2dformelt, prcp, prcpsol
             elif bucket_output:
                 return mb_month, pd_bucket
