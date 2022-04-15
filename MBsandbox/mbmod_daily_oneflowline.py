@@ -1846,8 +1846,8 @@ class TIModel_Parent(MassBalanceModel):
     def get_specific_summer_mb(self, heights, year=None,  # begin_winter_mb=None, end_winter_mb=None,
                                widths=None, add_climate=False, period_from_wgms=False,
                                **kwargs_monthly_mb):
-        """outputs specific winter MB in kg/m2. The actual winter time period can be (at the moment) either
-        default October 1st to April 30th  or the one as observed by the WGMS
+        """outputs specific summer MB in kg/m2. The actual summer time period can be (at the moment) either
+        default May 1st to end of September  or the one as observed by the WGMS
         (different for each glacier and observation year)
 
         todo: maybe also create a get_specific_hydro_mb() (which would be the doing first get_specific_winter_mb
@@ -1858,15 +1858,7 @@ class TIModel_Parent(MassBalanceModel):
         heights: ndarray
             the altitudes at which the mass-balance will be computed (has to be set)
         year: int
-            hydro integer year, (e.g. 2020 means winter 2019/2020),  (has to be set)
-        #begin_winter_mb : float or np.array
-        #    deprecated at the moment
-        #    if several years, has to be an array. Corresponds to yearmonthday of the starting day of the winter MB.
-        #    If perfect, should be YYYY1001 .
-        #end_winter_mb : float or np.array
-        #    deprecated at the moment
-        #    if several years, has to be an array. Corresponds to yearmonthday of the end day of the winter MB.
-        #    If perfect, should be YYYY0430 .
+            hydro integer year,  (has to be set)
         widths : ndarray
             widths that correspond to the given heights
             (if not given specific MB is estimated without weighting over the widths which is actually not wanted,
@@ -1877,7 +1869,7 @@ class TIModel_Parent(MassBalanceModel):
         period_from_wgms : bool
             if we compute MB by using the same observed time periods as the WGMS does (hence: time period is different
             for each year and glacier). Default is False (computing instead fixed date winter MB
-            on northern Hemisphere, always from October 1st - April 30th).
+            on northern Hemisphere, always from May 1st - end of September).
         **kwargs_monthly_mb:
             todo: do I need that?
 
