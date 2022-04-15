@@ -30,8 +30,9 @@ from oggm.cfg import SEC_IN_DAY, SEC_IN_YEAR
 from oggm.exceptions import InvalidParamsError, InvalidWorkflowError
 from oggm.utils import date_to_floatyear
 
-from MBsandbox.wip.help_func_geodetic import minimize_bias_geodetic
+import MBsandbox
 # imports from MBsandbox package modules
+from MBsandbox.wip.help_func_geodetic import minimize_bias_geodetic
 from MBsandbox.help_func import (compute_stat, minimize_bias,
                                  optimize_std_quot_brentq,
                                  melt_f_calib_geod_prep_inversion,
@@ -859,10 +860,20 @@ class Test_geodetic_sfc_type:
                                          'mb_real_daily', 'mb_monthly',
                                          ])
     def test_specific_winter_mb_no_sfc_type(self, gdir, gdir_aletsch, mb_type):
+        oggm_updated = False
+        if oggm_updated:
+            _, path = utils.get_wgms_files()
+            pd_mb_overview = pd.read_csv(path[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
+                                         index_col='Unnamed: 0')
+            pd_wgms_data_stats = pd.read_csv(path[:-len('/mbdata')] + '/wgms_data_stats_20220301.csv',
+                                             index_col='Unnamed: 0')
+        else:
+            path_mbsandbox = MBsandbox.__file__[:-len('/MBsandbox/__init__.py')]
+            pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
+                                         index_col='Unnamed: 0')
+            pd_wgms_data_stats = pd.read_csv(path_mbsandbox + '/data/wgms_data_stats_20220301.csv',
+                                             index_col='Unnamed: 0')
 
-        _, path = utils.get_wgms_files()
-        pd_mb_overview = pd.read_csv(path[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
-                                     index_col='Unnamed: 0')
         pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
         pd_mb_overview_sel_gdir.index = pd_mb_overview_sel_gdir.Year
         assert np.all(pd_mb_overview_sel_gdir.day_BEGIN_PERIOD == 1)
@@ -1056,7 +1067,8 @@ class Test_geodetic_sfc_type:
         np.testing.assert_allclose(out[0], pf_opt, rtol=0.05)
         np.testing.assert_allclose(out[1], melt_f_opt, rtol=0.05)
 
-    #@pytest.mark.slow
+
+    @pytest.mark.slow
     @pytest.mark.parametrize('mb_type', ['mb_pseudo_daily'])#'mb_real_daily', 'mb_monthly',#])
     def test_specific_winter_mb_sfc_type_optim_temp_b(self, gdir, gdir_aletsch, mb_type):
 
@@ -1096,9 +1108,19 @@ class Test_geodetic_sfc_type:
                                           ])
     def test_specific_winter_mb_sfc_type(self, gdir, gdir_aletsch, mb_type):
 
-        _, path = utils.get_wgms_files()
-        pd_mb_overview = pd.read_csv(path[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
-                                     index_col='Unnamed: 0')
+        oggm_updated = False
+        if oggm_updated:
+            _, path = utils.get_wgms_files()
+            pd_mb_overview = pd.read_csv(path[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
+                                         index_col='Unnamed: 0')
+            pd_wgms_data_stats = pd.read_csv(path[:-len('/mbdata')] + '/wgms_data_stats_20220301.csv',
+                                             index_col='Unnamed: 0')
+        else:
+            path_mbsandbox = MBsandbox.__file__[:-len('/MBsandbox/__init__.py')]
+            pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
+                                         index_col='Unnamed: 0')
+            pd_wgms_data_stats = pd.read_csv(path_mbsandbox + '/data/wgms_data_stats_20220301.csv',
+                                             index_col='Unnamed: 0')
         pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
         pd_mb_overview_sel_gdir.index = pd_mb_overview_sel_gdir.Year
         assert np.all(pd_mb_overview_sel_gdir.day_BEGIN_PERIOD == 1)
@@ -1830,6 +1852,14 @@ class Test_geodetic_hydro1:
                                              :np.shape(clim_mon[3])[1]]
                     np.testing.assert_allclose(solidprcp_mon_from_ann,
                                                clim_mon[3], rtol=1e-6)
+                    # check if sum of monthly is annual
+                    tfm_m_l = []
+                    for m in np.arange(1, 12.1, 1):
+                        floatyr = utils.date_to_floatyear(2015, m)
+                        clim_mon = gd_mb._get_2d_monthly_climate(h, floatyr)
+                        tfm_m_l.append(clim_mon[1].sum(axis=1))
+                    tfm_y_via_m = np.array(tfm_m_l).sum(axis=0)
+                    np.testing.assert_allclose(clim_ann[1].sum(axis=1), tfm_y_via_m)
 
                     # check if daily and annual mass balance are the same
                     # problem:

@@ -410,10 +410,93 @@ class TestProcessIsimipData:
             np.testing.assert_allclose(sgcm2.prcp.mean(),
                                        sgcm2_nc.prcp.mean(), rtol=0.1)
 
+    def test_process_isimip_data_prcp_bias_correction_issue(self, gdir):
+        cfg.PARAMS['hydro_month_nh'] = 1
+        ssp = 'ssp126'
+
+        base_url = ('https://cluster.klima.uni-bremen.de/~oggm/gdirs/oggm_v1.4/'
+                    'L1-L2_files/elev_bands')
+        df = ['RGI60-01.00570']
+        #gdirs = workflow.init_glacier_directories(df, from_prepro_level=2,
+        #                                          prepro_border=10,
+        #                                          prepro_base_url=base_url,
+        #                                          prepro_rgi_version='62')
+        gdir_strange = gdir #s[0]
+
+
+        process_w5e5_data(gdir_strange, temporal_resol='monthly',
+                          climate_type='W5E5')
+
+        process_isimip_data(gdir_strange, ensemble=ensemble, ssp=ssp,
+                            climate_historical_filesuffix='_monthly_W5E5')
+        process_isimip_data(gdir_strange, ensemble=ensemble, ssp=ssp, correct=False,
+                            climate_historical_filesuffix='_monthly_W5E5')
+        process_w5e5_data(gdir_strange, temporal_resol='daily',
+                          climate_type='W5E5'
+                          )
+        process_isimip_data(gdir_strange, ensemble=ensemble, ssp=ssp,
+                            temporal_resol='daily',
+                            climate_historical_filesuffix='_daily_W5E5')
+        process_isimip_data(gdir_strange, ensemble=ensemble, ssp=ssp,
+                            temporal_resol='daily',
+                            climate_historical_filesuffix='_daily_W5E5', correct=False)
+
+
+        #fh = gdir_strange.get_filepath('climate_historical',
+        #                       filesuffix='_monthly_W5E5')
+        fgcm = gdir_strange.get_filepath('gcm_data',
+                                 filesuffix='_monthly_ISIMIP3b_{}_{}'.format(ensemble, ssp))
+
+        fgcm_nc = gdir_strange.get_filepath('gcm_data',
+                                    filesuffix='_monthly_ISIMIP3b_{}_{}_no_correction'.format(ensemble, ssp))
+
+        #fh_d = gdir_strange.get_filepath('climate_historical',
+        #                         filesuffix='_daily_W5E5')
+        fgcm_d = gdir_strange.get_filepath('gcm_data',
+                                   filesuffix='_daily_ISIMIP3b_{}_{}'.format(ensemble, ssp))
+        fgcm_nc_d = gdir_strange.get_filepath('gcm_data',
+                                      filesuffix='_daily_ISIMIP3b_{}_{}_no_correction'.format(ensemble, ssp))
+
+        with xr.open_dataset(fgcm) as gcm, xr.open_dataset(fgcm_d) as gcm_d,\
+              xr.open_dataset(fgcm_nc) as gcm_nc, xr.open_dataset(fgcm_nc_d) as gcm_nc_d:
+
+            # daily and monthly should be similar
+            # first the non-OGGM corrected stuff
+            # temperature
+            yr_mean_nc_temp = gcm_nc.sel(time=slice(2015, 2100)).load().temp.groupby('time.year').mean()
+            yr_mean_nc_d_temp = gcm_nc_d.sel(time=slice(2015, 2100)).load().temp.groupby('time.year').mean()
+            np.testing.assert_allclose(yr_mean_nc_temp, yr_mean_nc_d_temp, rtol=1e-2)
+            # precipitation
+            yr_mean_nc_prcp = gcm_nc.sel(time=slice(2015, 2100)).load().prcp.groupby('time.year').mean()
+            yr_mean_nc_d_prcp = gcm_nc_d.sel(time=slice(2015, 2100)).load().prcp.groupby('time.year').mean()
+            np.testing.assert_allclose(yr_mean_nc_prcp, yr_mean_nc_d_prcp, rtol=1e-2)
+
+            # now the OGGM bias-corrected stuff
+            # temperature
+            yr_mean_temp = gcm.sel(time=slice(2015, 2100)).load().temp.groupby('time.year').mean()
+            yr_mean_d_temp = gcm_d.sel(time=slice(2015, 2100)).load().temp.groupby('time.year').mean()
+            np.testing.assert_allclose(yr_mean_temp, yr_mean_d_temp, rtol=1e-2)
+            # precipitation
+            yr_mean_prcp = gcm.sel(time=slice(2015, 2100)).load().prcp.groupby('time.year').mean()
+            yr_mean_d_prcp = gcm_d.sel(time=slice(2015, 2100)).load().prcp.groupby('time.year').mean()
+            np.testing.assert_allclose(yr_mean_prcp, yr_mean_d_prcp, rtol=1e-2)
+
+            # historical stuff should all be around the same
+            yr_mean_nc_h_temp = gcm_nc.sel(time=slice(1979, 2014)).load().temp.groupby('time.year').mean()
+            yr_mean_nc_d_h_temp = gcm_nc_d.sel(time=slice(1979, 2014)).load().temp.groupby('time.year').mean()
+            yr_mean_h_temp = gcm.sel(time=slice(1979, 2014)).load().temp.groupby('time.year').mean()
+            yr_mean_d_h_temp = gcm_d.sel(time=slice(1979, 2014)).load().temp.groupby('time.year').mean()
+
+            np.testing.assert_allclose(yr_mean_nc_h_temp, yr_mean_nc_d_h_temp)
+
+
+
+
     @pytest.mark.skip(reason="no one uses wfde5_cru ath the moment")
     def test_process_isimip_data_monthly_wfde5_cru(self, gdir):
         cfg.PARAMS['hydro_month_nh'] = 1
         ssp ='ssp126'
+        ensemble = 'mri-esm2-0_r1i1p1f1'
 
         process_w5e5_data(gdir, temporal_resol='monthly',
                            climate_type='WFDE5_CRU')

@@ -593,6 +593,7 @@ def process_gcm_data_adv_daily(gdir, output_filesuffix='', prcp=None,
         ts_tmp = temp.groupby('time.dayofyear') - ts_tmp_avg
         # then of precip -- scaled anomalies
         # has to be corrected differently because prcp has to be above or equal zero!
+        # first compute the standard anomaly compared to the average time period
         ts_pre_avg = prcp.sel(time=slice(*year_range))
         ts_pre_avg = ts_pre_avg.groupby('time.dayofyear').mean(dim='time')
         ts_pre_ano = prcp.groupby('time.dayofyear') - ts_pre_avg
@@ -695,6 +696,7 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
                         temporal_resol='monthly',
                         cluster=False,
                         year_range=('1979', '2014'),
+                        correct=True,
                         **kwargs):
     """Read, process and store the isimip climate data for this glacier.
 
@@ -715,6 +717,10 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
     climate_historical_filesuffix : str
         filesuffix of historical climate dataset that should be used to
         apply the anomaly method
+    correct : bool
+        whether the bias correction is applied (default is True) or not. As
+        we use already internally bias-corrected GCMs, we can also set this
+        to correct=False!
     **kwargs: any kwarg to be passed to ref:`process_gcm_data`
     """
 
@@ -909,6 +915,7 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
                                      source=output_filesuffix,
                                      year_range=year_range,
                                      climate_historical_filesuffix=climate_historical_filesuffix,
+                                     correct=correct,
                                      **kwargs)
     elif temporal_resol == 'daily':
         process_gcm_data_adv_daily(gdir,
@@ -917,6 +924,7 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
                                    source=output_filesuffix,
                                    year_range=year_range,
                                    climate_historical_filesuffix=climate_historical_filesuffix,
+                                   correct=correct,
                                    **kwargs)
 
 @entity_task(log, writes=['gcm_data'])
@@ -954,7 +962,7 @@ def process_isimip_data_no_corr(gdir, output_filesuffix='', fpath_temp=None,
     """
     if correct != False:
         raise InvalidWorkflowError('for processing isimip data with correction'
-                                  'please use process_isimip_data function')
+                                   'please use process_isimip_data function')
 
     if output_filesuffix == '':
         # recognize the gcm climate file for later
