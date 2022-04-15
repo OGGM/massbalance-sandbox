@@ -117,8 +117,10 @@ setup(
     python_requires='>=3.7',
     # If there are data files included in your packages that need to be
     # installed, specify them here.
-    package_data={  # Optional
-    },
+    #package_data={  # Optional
+    #},
+    include_package_data=True,
+    package_data={'': ['data/*.csv', 'MBsandbox/data/*.csv]},
 
     # Although 'package_data' is the preferred approach, in some case you may
     # need to place data files outside of your packages. See:
