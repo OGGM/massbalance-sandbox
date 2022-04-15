@@ -868,7 +868,7 @@ class Test_geodetic_sfc_type:
             pd_wgms_data_stats = pd.read_csv(path[:-len('/mbdata')] + '/wgms_data_stats_20220301.csv',
                                              index_col='Unnamed: 0')
         else:
-            path_mbsandbox = MBsandbox.__file__[:-len('/MBsandbox/__init__.py')]
+            path_mbsandbox = MBsandbox.__file__[:-len('/__init__.py')]
             pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
                                          index_col='Unnamed: 0')
             pd_wgms_data_stats = pd.read_csv(path_mbsandbox + '/data/wgms_data_stats_20220301.csv',
@@ -1116,7 +1116,7 @@ class Test_geodetic_sfc_type:
             pd_wgms_data_stats = pd.read_csv(path[:-len('/mbdata')] + '/wgms_data_stats_20220301.csv',
                                              index_col='Unnamed: 0')
         else:
-            path_mbsandbox = MBsandbox.__file__[:-len('/MBsandbox/__init__.py')]
+            path_mbsandbox = MBsandbox.__file__[:-len('/__init__.py')]
             pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
                                          index_col='Unnamed: 0')
             pd_wgms_data_stats = pd.read_csv(path_mbsandbox + '/data/wgms_data_stats_20220301.csv',
