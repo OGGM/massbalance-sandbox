@@ -831,11 +831,17 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
             pathi[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
             index_col='Unnamed: 0')
     else:
-        path_mbsandbox = MBsandbox.__file__[:-len('/__init__.py')]
-        pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
-                                     index_col='Unnamed: 0')
-        pd_wgms_data_stats = pd.read_csv(path_mbsandbox + '/data/wgms_data_stats_20220301.csv',
-                                         index_col='Unnamed: 0')
+        # path_mbsandbox = MBsandbox.__file__[:-len('/__init__.py')]
+        # pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
+        #                            index_col='Unnamed: 0')
+        # pd_wgms_data_stats = pd.read_csv(path_mbsandbox + '/data/wgms_data_stats_20220301.csv',
+        #                                 index_col='Unnamed: 0')
+        fp = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+                                   '/data/mb_overview_seasonal_mb_time_periods_20220301.csv')
+        pd_mb_overview = pd.read_csv(fp, index_col='Unnamed: 0')
+        fp_stats = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+                                         '/data/wgms_data_stats_20220301.csv')
+        pd_wgms_data_stats = pd.read_csv(fp_stats, index_col='Unnamed: 0')
     pd_mb_overview = pd_mb_overview[pd_mb_overview['at_least_5_winter_mb']]
     try:
         pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
@@ -1018,9 +1024,17 @@ def calibrate_to_geodetic_bias_winter_mb(gdir,  # temp_b_range = np.arange(-3,3,
             pathi[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
             index_col='Unnamed: 0')
     else:
-        path_mbsandbox = MBsandbox.__file__[:-len('/__init__.py')]
-        pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
-                                     index_col='Unnamed: 0')
+        # path_mbsandbox = MBsandbox.__file__[:-len('/__init__.py')]
+        # pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
+        #                            index_col='Unnamed: 0')
+        # pd_wgms_data_stats = pd.read_csv(path_mbsandbox + '/data/wgms_data_stats_20220301.csv',
+        #                                 index_col='Unnamed: 0')
+        fp = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+                                   '/data/mb_overview_seasonal_mb_time_periods_20220301.csv')
+        pd_mb_overview = pd.read_csv(fp, index_col='Unnamed: 0')
+        fp_stats = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+                                         '/data/wgms_data_stats_20220301.csv')
+        pd_wgms_data_stats = pd.read_csv(fp_stats, index_col='Unnamed: 0')
     pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
     pd_mb_overview_sel_gdir.index = pd_mb_overview_sel_gdir.Year
     yrs_seasonal_mbs = pd_mb_overview_sel_gdir.Year.values
@@ -1839,12 +1853,17 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir,
             pathi[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
             index_col='Unnamed: 0')
     else:
-        #pathi = '/home/lilianschuster/Schreibtisch/PhD/wgms_data_analysis'
-        path_mbsandbox = MBsandbox.__file__[:-len('/__init__.py')]
-        pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
-                                     index_col='Unnamed: 0')
-        pd_wgms_data_stats = pd.read_csv(path_mbsandbox + '/data/wgms_data_stats_20220301.csv',
-                                         index_col='Unnamed: 0')
+        # path_mbsandbox = MBsandbox.__file__[:-len('/__init__.py')]
+        # pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
+        #                            index_col='Unnamed: 0')
+        # pd_wgms_data_stats = pd.read_csv(path_mbsandbox + '/data/wgms_data_stats_20220301.csv',
+        #                                 index_col='Unnamed: 0')
+        fp = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+                                   '/data/mb_overview_seasonal_mb_time_periods_20220301.csv')
+        pd_mb_overview = pd.read_csv(fp, index_col='Unnamed: 0')
+        fp_stats = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+                                         '/data/wgms_data_stats_20220301.csv')
+        pd_wgms_data_stats = pd.read_csv(fp_stats, index_col='Unnamed: 0')
     pd_mb_overview = pd_mb_overview[pd_mb_overview['at_least_5_winter_mb']]
     try:
         pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
