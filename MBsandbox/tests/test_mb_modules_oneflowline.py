@@ -873,11 +873,14 @@ class Test_geodetic_sfc_type:
             #                            index_col='Unnamed: 0')
             # pd_wgms_data_stats = pd.read_csv(path_mbsandbox + '/data/wgms_data_stats_20220301.csv',
             #                                 index_col='Unnamed: 0')
-            fp = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
-                                       '/data/mb_overview_seasonal_mb_time_periods_20220301.csv')
+            #fp = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+            #                           '/data/mb_overview_seasonal_mb_time_periods_20220301.csv')
+            fp = 'https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers/data/mb_overview_seasonal_mb_time_periods_20220301.csv'
+            fp_stats = ('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+                        '/data/wgms_data_stats_20220301.csv')
             pd_mb_overview = pd.read_csv(fp, index_col='Unnamed: 0')
-            fp_stats = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
-                                             '/data/wgms_data_stats_20220301.csv')
+            #fp_stats = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+            #                                 '/data/wgms_data_stats_20220301.csv')
             pd_wgms_data_stats = pd.read_csv(fp_stats, index_col='Unnamed: 0')
 
         pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
@@ -1127,11 +1130,14 @@ class Test_geodetic_sfc_type:
             #                            index_col='Unnamed: 0')
             # pd_wgms_data_stats = pd.read_csv(path_mbsandbox + '/data/wgms_data_stats_20220301.csv',
             #                                 index_col='Unnamed: 0')
-            fp = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
-                                       '/data/mb_overview_seasonal_mb_time_periods_20220301.csv')
+            #fp = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+            #                           '/data/mb_overview_seasonal_mb_time_periods_20220301.csv')
+            fp = 'https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers/data/mb_overview_seasonal_mb_time_periods_20220301.csv'
+            fp_stats = ('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+                        '/data/wgms_data_stats_20220301.csv')
             pd_mb_overview = pd.read_csv(fp, index_col='Unnamed: 0')
-            fp_stats = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
-                                             '/data/wgms_data_stats_20220301.csv')
+            #fp_stats = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+            #                                 '/data/wgms_data_stats_20220301.csv')
             pd_wgms_data_stats = pd.read_csv(fp_stats, index_col='Unnamed: 0')
         pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
         pd_mb_overview_sel_gdir.index = pd_mb_overview_sel_gdir.Year
