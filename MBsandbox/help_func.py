@@ -1680,7 +1680,7 @@ def calibrate_to_geodetic_bias_winter_mb_fast(gd_mb,  # temp_b_range = np.arange
     # (like that also years in between (without observations) are estimated)
     # [only important for TIModel_Sfc_Type, if observations have missing years in between]
     gd_mb.get_specific_mb(heights=hgts, widths=widths,
-                              year=np.arange(1979, # yrs_seasonal_mbs[0]
+                          year=np.arange(1979, # yrs_seasonal_mbs[0]
                                              2019 + 1, 1))
     # in case of HEF this should be the same !!! (as HEF always has WGMS seasonal MB from Oct 1st to April 30th)
     outi_right_period = gd_mb.get_specific_winter_mb(heights=hgts, year=yrs_seasonal_mbs, widths=widths,

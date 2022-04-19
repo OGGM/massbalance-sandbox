@@ -1746,7 +1746,7 @@ class TIModel_Parent(MassBalanceModel):
             if isinstance(self, TIModel_Sfc_Type):
                 year_spinup = np.append(year[0] - 1, year)
                 # first pre-compute all MB, then take only those months that are wished!
-                self.get_specific_mb(heights, year=year_spinup)
+                self.get_specific_mb(heights, year=year_spinup, widths=widths)
                 # they are saved, so computational time should not increase much
 
             if add_climate:
@@ -1931,7 +1931,7 @@ class TIModel_Parent(MassBalanceModel):
             if isinstance(self, TIModel_Sfc_Type):
                 year_spinup = np.append(year[0] - 1, year)
                 # first pre-compute all MB, then take only those months that are wished!
-                self.get_specific_mb(heights, year=year_spinup)
+                self.get_specific_mb(heights, year=year_spinup, widths=widths)
                 # they are saved, so computational time should not increase much
 
             if add_climate:
