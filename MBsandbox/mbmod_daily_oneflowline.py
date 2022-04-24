@@ -1734,8 +1734,13 @@ class TIModel_Parent(MassBalanceModel):
             ratio_m_end = d_end/m_end_days_in_month
 
         else:
-            m_start = 10
-            m_end = 4 + 1  # until end of April
+            if self.hemisphere == 'nh':
+                m_start = 10
+                m_end = 4 + 1  # until end of April
+            else:
+                # just a bit arbitrarily
+                m_start = 4
+                m_end = 10 +1
             ratio_m_start = 1
             ratio_m_end = 1
 

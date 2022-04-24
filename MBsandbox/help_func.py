@@ -1451,40 +1451,47 @@ def calibrate_to_geodetic_bias_std_quot_fast(gd_mb,  # temp_b_range = np.arange(
         melt_f_update = np.NaN
     if melt_f_update != 'annual':
         # in case of HEF this should be the same !!! (as HEF always has WGMS seasonal MB from Oct 1st to April 30th)
-        outi_right_period = gd_mb.get_specific_winter_mb(heights=hgts, year=yrs_seasonal_mbs, widths=widths,
-                                                             add_climate=True,
-                                                             period_from_wgms=True)
+        try:
+            outi_right_period = gd_mb.get_specific_winter_mb(heights=hgts, year=yrs_seasonal_mbs, widths=widths,
+                                                                 add_climate=True,
+                                                                 period_from_wgms=True)
 
-        ## estimate winter mb bias and save it (not the absolute value!!!)
-        winter_mb_bias = outi_right_period[0].mean() - winter_mb_observed.mean()
 
-        t, tfm, prcp, prcpsol = outi_right_period[1:]
+            ## estimate winter mb bias and save it (not the absolute value!!!)
+            winter_mb_bias = outi_right_period[0].mean() - winter_mb_observed.mean()
 
-        pd_prcp = pd.DataFrame(prcp).T
-        pd_prcp.index.name = 'distance_along_flowline'
-        pd_prcp.columns = yrs_seasonal_mbs
-        winter_prcp_mean = pd_prcp.mean().mean()
+            t, tfm, prcp, prcpsol = outi_right_period[1:]
 
-        pd_solid_prcp = pd.DataFrame(prcpsol).T
-        pd_solid_prcp.index.name = 'distance_along_flowline'
-        pd_solid_prcp.columns = yrs_seasonal_mbs
-        winter_solid_prcp_mean = np.average(pd_solid_prcp.mean(axis=1), weights=widths)
+            pd_prcp = pd.DataFrame(prcp).T
+            pd_prcp.index.name = 'distance_along_flowline'
+            pd_prcp.columns = yrs_seasonal_mbs
+            winter_prcp_mean = pd_prcp.mean().mean()
 
-        if mb_type == 'mb_real_daily':
-            fact = 12 / 365.25
-        else:
-            fact = 1
+            pd_solid_prcp = pd.DataFrame(prcpsol).T
+            pd_solid_prcp.index.name = 'distance_along_flowline'
+            pd_solid_prcp.columns = yrs_seasonal_mbs
+            winter_solid_prcp_mean = np.average(pd_solid_prcp.mean(axis=1), weights=widths)
 
-        pd_tfm = pd.DataFrame(tfm).T
-        pd_tfm.index.name = 'distance_along_flowline'
-        pd_tfm.columns = yrs_seasonal_mbs
-        # how much minimum melt happened over winter months?
-        if sfc_type_distinction:
-            melt_w_month_kg_m2_2d = pd_tfm * fact * gd_mb.melt_f_buckets[0]
-        else:
-            melt_w_month_kg_m2_2d = pd_tfm * fact * gd_mb.melt_f
+            if mb_type == 'mb_real_daily':
+                fact = 12 / 365.25
+            else:
+                fact = 1
 
-        specific_melt_winter = np.average(melt_w_month_kg_m2_2d.mean(axis=1), weights=widths)
+            pd_tfm = pd.DataFrame(tfm).T
+            pd_tfm.index.name = 'distance_along_flowline'
+            pd_tfm.columns = yrs_seasonal_mbs
+            # how much minimum melt happened over winter months?
+            if sfc_type_distinction:
+                melt_w_month_kg_m2_2d = pd_tfm * fact * gd_mb.melt_f_buckets[0]
+            else:
+                melt_w_month_kg_m2_2d = pd_tfm * fact * gd_mb.melt_f
+
+            specific_melt_winter = np.average(melt_w_month_kg_m2_2d.mean(axis=1), weights=widths)
+        except:
+            winter_prcp_mean = np.NaN
+            winter_solid_prcp_mean = np.NaN
+            specific_melt_winter = np.NaN
+            winter_mb_bias = np.NaN
     else:
         winter_prcp_mean = np.NaN
         winter_solid_prcp_mean = np.NaN
