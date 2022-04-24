@@ -878,12 +878,12 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
                                      'mb_type', 'grad_type', 'melt_f_change', 'melt_f_update','tau_e_fold_yr'])
     for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_real_daily']:
         for grad_type in ['cte', 'var_an_cycle']:
-            for melt_f_change_r in ['linear', 'neg_exp_t0.5yr', 'neg_exp_t1yr']:
+            for melt_f_change_r in ['linear', 'neg_exp_t0.5yr', 'neg_exp_t1.0yr']:
                 if 'neg_exp' in melt_f_change_r:
                     melt_f_change = 'neg_exp'
                     if melt_f_change_r == 'neg_exp_t0.5yr':
                         tau_e_fold_yr = 0.5
-                    elif melt_f_change_r == 'neg_exp_t1yr':
+                    elif melt_f_change_r == 'neg_exp_t1.0yr':
                         tau_e_fold_yr = 1
                 else:
                     melt_f_change = melt_f_change_r
