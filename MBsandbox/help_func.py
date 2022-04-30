@@ -911,10 +911,39 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
                 else:
                     if pf_cte_via == '_pf_via_winter_mb_log_fit':
                         path_folder = '/home/lilianschuster/Schreibtisch/PhD/Schuster_et_al_phd_paper_1/data/'
-                        pd_pf = pd.read_csv(
-                            f'{path_folder}winter_prcp_mean_general_log_relation_pf_winter_mb_match.csv',
-                            index_col='rgi_id')
-                        pf_cte = pd_pf.loc[gdir.rgi_id]['pf_via_log_regression']
+                        #pd_pf = pd.read_csv(
+                        #    f'{path_folder}winter_prcp_mean_general_log_relation_pf_winter_mb_match.csv',
+                        #    index_col='rgi_id')
+                        pd_pf = pd.read_csv(f'{path_folder}winter_daily_prcp_mean_general_log_relation_pf_winter_mb_match.csv', index_col='rgi_id')
+                        # old
+                        # pf_cte = pd_pf.loc[gdir.rgi_id]['pf_via_log_regression']
+                        hemisphere = gdir.hemisphere
+                        # if NH ---
+                        import xarray as xr
+                        fpath_clim = gdir.get_filepath('climate_historical', filesuffix='_daily_W5E5')
+                        ds_prcp = xr.open_dataset(fpath_clim).prcp
+                        if hemisphere == 'nh':
+                            ds_prcp_winter = ds_prcp.where(ds_prcp['time.month'].isin([10, 11, 12, 1, 2, 3, 4]),
+                                                           drop=True)
+                        else:
+                            ds_prcp_winter = ds_prcp.where(ds_prcp['time.month'].isin([4, 5, 6, 7, 8, 9, 10]),
+                                                           drop=True)
+                        prcp_winter_daily_mean = ds_prcp_winter.mean().values  # kg m-2 day-1
+                        def log_func(x, a, b):
+                            r = a * np.log(x) + b
+                            # don't allow extremely low/high prcp. factors!!!
+                            if np.shape(r) == ():
+                                if r > 10:
+                                    r = 10
+                                if r < 0.1:
+                                    r = 0.1
+                            else:
+                                r[r > 10] = 10
+                                r[r < 0.1] = 0.1
+                            return r
+                        # the log_func params are all the same over the columnspd_pf['a_log_multiplier'].iloc[0]
+                        pf_cte = log_func(prcp_winter_daily_mean, pd_pf['a_log_multiplier'].iloc[0],
+                                          pd_pf['b_intercept'].iloc[0])
                     elif pf_cte_via == '' or pf_cte_via == '_pf_cte_via_std':
                         if not sfc_type_distinction:
                             melt_f_change = np.NaN

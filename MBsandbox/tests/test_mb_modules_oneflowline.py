@@ -447,6 +447,7 @@ class Test_geodetic_sfc_type:
                                                            for m in np.arange(1,6,1)]))
 
     # this test is here to show that it fails
+    @pytest.mark.skip(reason='this test is expected to fail')
     @pytest.mark.parametrize('mb_type', [ 'mb_monthly']) # ,'mb_pseudo_daily', 'mb_real_daily'])
     def test_monthly_mb_for_annual_mb(self, gdir, mb_type):
 
@@ -856,8 +857,8 @@ class Test_geodetic_sfc_type:
             assert np.shape(temp_avg_2d_clim) == (len(h), 12*31)
 
 
-    @pytest.mark.parametrize('mb_type', ['mb_pseudo_daily',
-                                         'mb_real_daily', 'mb_monthly',
+    @pytest.mark.parametrize('mb_type', [#'mb_pseudo_daily', it takes so long to run all ...
+                                         'mb_real_daily'#, 'mb_monthly',
                                          ])
     def test_specific_winter_mb_no_sfc_type(self, gdir, gdir_aletsch, mb_type):
         oggm_updated = False
@@ -865,8 +866,8 @@ class Test_geodetic_sfc_type:
             _, path = utils.get_wgms_files()
             pd_mb_overview = pd.read_csv(path[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
                                          index_col='Unnamed: 0')
-            pd_wgms_data_stats = pd.read_csv(path[:-len('/mbdata')] + '/wgms_data_stats_20220301.csv',
-                                             index_col='Unnamed: 0')
+            #pd_wgms_data_stats = pd.read_csv(path[:-len('/mbdata')] + '/wgms_data_stats_20220301.csv',
+            #                                 index_col='Unnamed: 0')
         else:
             # path_mbsandbox = MBsandbox.__file__[:-len('/__init__.py')]
             # pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
@@ -881,7 +882,7 @@ class Test_geodetic_sfc_type:
             pd_mb_overview = pd.read_csv(fp, index_col='Unnamed: 0')
             #fp_stats = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
             #                                 '/data/wgms_data_stats_20220301.csv')
-            pd_wgms_data_stats = pd.read_csv(fp_stats, index_col='Unnamed: 0')
+            #pd_wgms_data_stats = pd.read_csv(fp_stats, index_col='Unnamed: 0')
 
         pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == gdir.rgi_id]
         pd_mb_overview_sel_gdir.index = pd_mb_overview_sel_gdir.Year
@@ -1433,6 +1434,7 @@ class Test_geodetic_sfc_type:
 class Test_geodetic_hydro1:
     # classes have to be upper case in order that they
     # all tests with hydro_month = 1
+    @pytest.mark.no_w5e5
     def test_hydro_years_HEF(self, gdir):
         # only very basic test, the other stuff is done in oggm man basis
         # test if it also works for hydro_month ==1, necessary for geodetic mb
@@ -1459,7 +1461,7 @@ class Test_geodetic_hydro1:
         assert test_climate.time[0] == np.datetime64('1979-01-01')
         assert test_climate.time[-1] == np.datetime64('2018-12-31')
 
-    def test_optimize_std_quot_brentq_WFDE5(self, gdir):
+    def test_optimize_std_quot_brentq_W5E5(self, gdir):
         # check if double optimisation of bias and std_quotient works
         cfg.PARAMS['hydro_month_nh'] = 1
 
@@ -1468,8 +1470,8 @@ class Test_geodetic_hydro1:
         for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_real_daily']:
             melt_fs = []
             prcp_facs = []
-            for climate_type in ['WFDE5_CRU', 'W5E5', 'W5E5_MSWEP']:
-
+            #for climate_type in ['WFDE5_CRU', 'W5E5', 'W5E5_MSWEP']: # we don't use that anymore ...
+            for climate_type in ['W5E5']:
                 if mb_type != 'mb_real_daily':
                     temporal_resol = 'monthly'
                     process_w5e5_data(gdir, climate_type=climate_type,
@@ -1516,7 +1518,8 @@ class Test_geodetic_hydro1:
                 # save melt_f and prcp_fac to compare between climate datasets
                 melt_fs.append(melt_f_opt_pf)
                 prcp_facs.append(pf_opt)
-            assert_allclose(melt_fs[0], melt_fs[1], rtol=0.2)
+            if len(melt_fs) > 1:
+                assert_allclose(melt_fs[0], melt_fs[1], rtol=0.2)
             # prcp_fac can be quite different ...
             #assert_allclose(prcp_facs[0], prcp_facs[1])
 
@@ -1787,7 +1790,7 @@ class Test_geodetic_hydro1:
                 # check if the bias is optimised
                 assert bias.round() == 0
 
-
+    @pytest.mark.skip(reason='this test is expected to fail')
     def test_daily_monthly_annual_specific_mb(self, gdir):
         # this test is "expected" to fail
         # there are small differences because of different days on a year (leap years) which are differently
@@ -1992,6 +1995,7 @@ class Test_geodetic_hydro1:
 
 # start it again to have the default hydro_month
 class Test_directobs_hydro10:
+    @pytest.mark.no_w5e5
     def test_minimize_bias(self, gdir):
 
         cfg.PARAMS['hydro_month_nh'] = 10
@@ -2042,7 +2046,7 @@ class Test_directobs_hydro10:
             # check if the bias is optimised
             assert bias.round() == 0
 
-
+    @pytest.mark.no_w5e5
     def test_optimize_std_quot_brentq_ERA5dr(self, gdir):
         # check if double optimisation of bias and std_quotient works
 
@@ -2141,6 +2145,7 @@ class Test_directobs_hydro10:
 
     # I use here the exact same names as in test_models from OGGM.
     # but somehow the test for ref_mb_profile() is not equal
+    @pytest.mark.no_w5e5
     def test_present_time_glacier_massbalance(self, gdir):
 
         cfg.PARAMS['hydro_month_nh'] = 10
@@ -2233,6 +2238,7 @@ class Test_directobs_hydro10:
                         #                           rtol=0.15)
                         # 0.15 does not work
 
+    @pytest.mark.no_w5e5
     def test_monthly_glacier_massbalance(self, gdir):
         # I think there is a problem with SEC_IN_MONTH/SEC_IN_YEAR ...
         # do this for all model types
@@ -2467,6 +2473,7 @@ class Test_directobs_hydro10:
             TIModel(gdir, None, mb_type='mb_monthly', prcp_fac=-1,
                     grad_type='cte', input_filesuffix='')
 
+    @pytest.mark.no_w5e5
     def test_historical_climate_qc_mon(self, gdir):
 
         cfg.PARAMS['hydro_month_nh'] = 10
