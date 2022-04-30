@@ -35,6 +35,7 @@ from oggm.exceptions import InvalidParamsError, InvalidWorkflowError
 from oggm.shop.ecmwf import get_ecmwf_file, BASENAMES
 from oggm.core.massbalance import MassBalanceModel
 
+import MBsandbox
 
 # Module logger
 log = logging.getLogger(__name__)
@@ -440,7 +441,7 @@ def process_w5e5_data(gdir, y0=None, y1=None, temporal_resol='daily',
 
     # todo: this logic should be removed
     if cluster:
-        cluster_path = '/home/users/lschuster/'
+        cluster_path = '/home/www/lschuster/'
         path_tmp = cluster_path + BASENAMES[dataset]['tmp']
         path_prcp = cluster_path + BASENAMES[dataset_prcp]['prcp']
         path_inv = cluster_path + BASENAMES[dataset]['inv']
@@ -1021,6 +1022,9 @@ class TIModel_Parent(MassBalanceModel):
         # This is necessary for automated ELA search.
         self.valid_bounds = [-1e4, 2e4]
 
+        # only have one flowline when using elevation bands
+        self.fl = gdir.read_pickle('inversion_flowlines')[-1]
+
         # check if the right climate is used for the right mb_type
         if baseline_climate == None:
             try:
@@ -1467,6 +1471,7 @@ class TIModel_Parent(MassBalanceModel):
 
             # temp_for_melt is computed separately depending on mb_type
             tempformelt = self._get_tempformelt(temp, pok)
+
             prcp = np.ones(npix) * iprcp
             fac = 1 - (temp - self.t_solid) / (self.t_liq - self.t_solid)
             prcpsol = prcp * clip_array(fac, 0, 1)
@@ -1560,7 +1565,7 @@ class TIModel_Parent(MassBalanceModel):
         """ Helper function to compute tempformelt to avoid code duplication
         in get_monthly_climate() and _get2d_annual_climate()
 
-        comment: I can' use  _get_tempformelt outside the class, but sometimes this could be useful.
+        comment: I can't use  _get_tempformelt outside the class, but sometimes this could be useful.
         If using this again outside of this class, need to remove the "self",
         such as for 'mb_climate_on_height' in climate.py, that has no self....
         (would need to change temp, t_melt ,temp_std, mb_type, N, loop)
@@ -1629,6 +1634,9 @@ class TIModel_Parent(MassBalanceModel):
 
         same as in OGGM default but only for a single elevation band flowline
 
+        Attention: temperature for melt is either in sum over monthly
+        mean or in annual sum (if real_daily)!
+
         Parameters
         -------
         heights: ndarray
@@ -1682,15 +1690,32 @@ class TIModel_Parent(MassBalanceModel):
             on northern Hemisphere, always from October 1st - April 30th).
         **kwargs_monthly_mb:
             todo: do I need that?
+
+        Returns
+        -------
+        either just specific winter mb , or (spec_winter_mb, temp, tempformelt, prcp, prcpsol). Note that temp. is the
+        mean temperature and all other variables are the sum over the winter months. Attention: temperature for melt
+        is either in sum over monthly mean winter months or in annual sum (if real_daily)!
         """
         # replace this to oggm-sample-data path and use utils.file_downloader
         if period_from_wgms:
-            #pd_mb_overview = pd.read_csv(
-            #    '/home/lilianschuster/Schreibtisch/PhD/wgms_data_analysis/mb_overview_seasonal_mb_time_periods.csv',
-            #    index_col='Unnamed: 0')
             _, path = utils.get_wgms_files()
-            pd_mb_overview = pd.read_csv(path[:-len('/mbdata')]+'/mb_overview_seasonal_mb_time_periods_20220301.csv',
-                                         index_col='Unnamed: 0')
+            oggm_updated = False
+            if oggm_updated:
+                _, path = utils.get_wgms_files()
+                pd_mb_overview = pd.read_csv(
+                    path[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
+                    index_col='Unnamed: 0')
+            else:
+                #path_mbsandbox = MBsandbox.__file__[:-len('/__init__.py')]
+                #pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
+                #                            index_col='Unnamed: 0')
+                #fp = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers'+
+                #                                '/data/mb_overview_seasonal_mb_time_periods_20220301.csv')
+                fp = 'https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers/data/mb_overview_seasonal_mb_time_periods_20220301.csv'
+                pd_mb_overview = pd.read_csv(fp, index_col='Unnamed: 0')
+            pd_mb_overview = pd_mb_overview[pd_mb_overview['at_least_5_winter_mb']]
+
             pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == self.fl.rgi_id]
             pd_mb_overview_sel_gdir_yr = pd_mb_overview_sel_gdir.loc[pd_mb_overview_sel_gdir.Year == year]
             ### starting period
@@ -1707,13 +1732,15 @@ class TIModel_Parent(MassBalanceModel):
             # ratio of last month that we want to estimate?
             # if d_end == m_end_days_in_month, then the entire month should be used
             ratio_m_end = d_end/m_end_days_in_month
-            # m_start = pd_mb_overview_sel_gdir_yr.month_BEGIN_PERIOD.unique() #.apply(lambda d: d.month)
-            # m_end = pd_mb_overview_sel_gdir_yr.month_END_WINTER.unique() + 1
-            # .apply(lambda d: d[5:7]) + 1
 
         else:
-            m_start = 10
-            m_end = 4 + 1  # until end of April
+            if self.hemisphere == 'nh':
+                m_start = 10
+                m_end = 4 + 1  # until end of April
+            else:
+                # just a bit arbitrarily
+                m_start = 4
+                m_end = 10 +1
             ratio_m_start = 1
             ratio_m_end = 1
 
@@ -1724,7 +1751,7 @@ class TIModel_Parent(MassBalanceModel):
             if isinstance(self, TIModel_Sfc_Type):
                 year_spinup = np.append(year[0] - 1, year)
                 # first pre-compute all MB, then take only those months that are wished!
-                self.get_specific_mb(heights, year=year_spinup)
+                self.get_specific_mb(heights, year=year_spinup, widths=widths)
                 # they are saved, so computational time should not increase much
 
             if add_climate:
@@ -1804,26 +1831,190 @@ class TIModel_Parent(MassBalanceModel):
         else:
             return np.average(mbs_winter, weights=widths)
 
-    def get_specific_summer_mb(self, heights, year=None, widths=None, add_climate=False, **kwargs_monthly_mb):
-        """outputs specific summer MB in kg/m2.
-        This is not yet tested and only works for northern Hemisphere at the moment.
-        year corresponds to hydro "integer" year
+   # def get_specific_summer_mb(self, heights, year=None, widths=None, add_climate=False, **kwargs_monthly_mb):
+   #     """outputs specific summer MB in kg/m2.
+   #     This is not yet tested and only works for northern Hemisphere at the moment.
+   #     year corresponds to hydro "integer" year
+   #
+   #     WORK IN PROCESS -> adapt it if get_specific_winter_mb is corrected the right way!
+   #     """
+   #     raise NotImplementedError('todo: has to be copied / adapted from get_specific_winter_mb')
+   #     m_start = 5 # start in May
+   #     m_end = 10  # until end of September
+   #     mbs_summer = 0
+   #     if widths is None:
+   #         raise InvalidParamsError('need to set widths to get correct specific winter MB')
+   #     for m in np.arange(m_start, m_end , 1):
+   #         floatyr = utils.date_to_floatyear(year, m)
+   #         mbs_summer += self.get_monthly_mb(heights, year=floatyr, **kwargs_monthly_mb)
+   #     mbs_summer = mbs_summer * self.SEC_IN_MONTH * self.rho
+   #     if add_climate:
+   #         raise NotImplementedError('TODO: add_climate has to be implemented!')
+   #     return np.average(mbs_summer, weights=widths)
 
-        WORK IN PROCESS -> adapt it if get_specific_winter_mb is corrected the right way!
+    def get_specific_summer_mb(self, heights, year=None,  # begin_winter_mb=None, end_winter_mb=None,
+                               widths=None, add_climate=False, period_from_wgms=False,
+                               **kwargs_monthly_mb):
+        """outputs specific summer MB in kg/m2. The actual summer time period can be (at the moment) either
+        default May 1st to end of September  or the one as observed by the WGMS
+        (different for each glacier and observation year)
+
+        todo: maybe also create a get_specific_hydro_mb() (which would be the doing first get_specific_winter_mb
+         and then get_specific_summer_mb
+
+        Parameters
+        -------
+        heights: ndarray
+            the altitudes at which the mass-balance will be computed (has to be set)
+        year: int
+            hydro integer year,  (has to be set)
+        widths : ndarray
+            widths that correspond to the given heights
+            (if not given specific MB is estimated without weighting over the widths which is actually not wanted,
+            -> that's why you have to set the widths!)
+        add_climate : bool
+            default is False. If True, climate (temperature, temp_for_melt, prcp, prcp_solid) are also given as output.
+            Prcp and temp_for_melt as sum over winter months, temperature as mean.
+        period_from_wgms : bool
+            if we compute MB by using the same observed time periods as the WGMS does (hence: time period is different
+            for each year and glacier). Default is False (computing instead fixed date winter MB
+            on northern Hemisphere, always from May 1st - end of September).
+        **kwargs_monthly_mb:
+            todo: do I need that?
+
+        Returns
+        -------
+        either just specific summer mb , or (spec_summmer_mb, temp, tempformelt, prcp, prcpsol). Note that temp. is the
+        mean temperature and all other variables are the sum over the winter months. Attention: temperature for melt
+        is either in sum over monthly mean winter months or in annual sum (if real_daily)!
         """
-        raise NotImplementedError('todo: has to be copied / adapted from get_specific_winter_mb')
-        m_start = 5 # start in May
-        m_end = 10  # until end of September
-        mbs_summer = 0
+        # replace this to oggm-sample-data path and use utils.file_downloader
+        if period_from_wgms:
+            _, path = utils.get_wgms_files()
+            oggm_updated = False
+            if oggm_updated:
+                _, path = utils.get_wgms_files()
+                pd_mb_overview = pd.read_csv(
+                    path[:-len('/mbdata')] + '/mb_overview_seasonal_mb_time_periods_20220301.csv',
+                    index_col='Unnamed: 0')
+            else:
+                # path_mbsandbox = MBsandbox.__file__[:-len('/__init__.py')]
+                # pd_mb_overview = pd.read_csv(path_mbsandbox + '/data/mb_overview_seasonal_mb_time_periods_20220301.csv',
+                #                            index_col='Unnamed: 0')
+                #fp = utils.file_downloader('https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers' +
+                #                           '/data/mb_overview_seasonal_mb_time_periods_20220301.csv')
+                fp = 'https://cluster.klima.uni-bremen.de/~lschuster/ref_glaciers/data/mb_overview_seasonal_mb_time_periods_20220301.csv'
+                pd_mb_overview = pd.read_csv(fp, index_col='Unnamed: 0')
+            pd_mb_overview = pd_mb_overview[pd_mb_overview['at_least_5_winter_mb']]
+            pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == self.fl.rgi_id]
+            pd_mb_overview_sel_gdir_yr = pd_mb_overview_sel_gdir.loc[pd_mb_overview_sel_gdir.Year == year]
+            ### starting period
+            m_start = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype(np.datetime64).iloc[0].month
+            d_start = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype(np.datetime64).iloc[0].day
+            m_start_days_in_month = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype(np.datetime64).iloc[0].days_in_month
+            # ratio of 1st month that we want to estimate?
+            # if d_start is 1 -> ratio should be 1 --> the entire month should be added to the winter MB
+            ratio_m_start = 1 - (d_start - 1) / m_start_days_in_month
+            ### end period
+            m_end = pd_mb_overview_sel_gdir_yr['END_PERIOD'].astype(np.datetime64).iloc[0].month + 1
+            m_end_days_in_month = pd_mb_overview_sel_gdir_yr['END_PERIOD'].astype(np.datetime64).iloc[0].days_in_month
+            d_end = pd_mb_overview_sel_gdir_yr['END_PERIOD'].astype(np.datetime64).iloc[0].day
+            # ratio of last month that we want to estimate?
+            # if d_end == m_end_days_in_month, then the entire month should be used
+            ratio_m_end = d_end / m_end_days_in_month
+
+        else:
+            m_start = 5
+            m_end = 9 + 1  # until end of April
+            ratio_m_start = 1
+            ratio_m_end = 1
+
         if widths is None:
             raise InvalidParamsError('need to set widths to get correct specific winter MB')
-        for m in np.arange(m_start, m_end , 1):
-            floatyr = utils.date_to_floatyear(year, m)
-            mbs_summer += self.get_monthly_mb(heights, year=floatyr, **kwargs_monthly_mb)
+
+        if len(np.atleast_1d(year)) > 1:
+            if isinstance(self, TIModel_Sfc_Type):
+                year_spinup = np.append(year[0] - 1, year)
+                # first pre-compute all MB, then take only those months that are wished!
+                self.get_specific_mb(heights, year=year_spinup, widths=widths)
+                # they are saved, so computational time should not increase much
+
+            if add_climate:
+                out = []
+                t_list = []
+                tfm_list = []
+                prcp_list = []
+                prcp_sol_list = []
+                for k in np.arange(0, len(year), 1):
+                    out_k = self.get_specific_summer_mb(heights, year=year[k],
+                                                        widths=widths,
+                                                        add_climate=add_climate,
+                                                        period_from_wgms=period_from_wgms,
+                                                        **kwargs_monthly_mb)
+                    out.append(out_k[0])
+                    for numi, listi, in enumerate([t_list, tfm_list, prcp_list, prcp_sol_list]):
+                        listi.append(out_k[numi + 1])
+                return (np.asarray(out), np.asarray(t_list), np.asarray(tfm_list),
+                        np.asarray(prcp_list), np.asarray(prcp_sol_list))
+
+
+            else:
+                out = [self.get_specific_summer_mb(heights, year=year[k],
+                                                   widths=widths,
+                                                   add_climate=add_climate,
+                                                   period_from_wgms=period_from_wgms,
+                                                   **kwargs_monthly_mb) for k in np.arange(0, len(year), 1)]
+            return np.asarray(out)
+
+        # if year == 1980 and isinstance(self, TIModel_Sfc_Type):
+        #    # need to do a "special" spinup!
+        #    for m in np.arange(1, m_start, 1):
+        #        floatyr = utils.date_to_floatyear(year-1, m)
+        #        self.get_monthly_mb(heights, year=floatyr)
+        mbs_summer = 0
+        if add_climate:
+            t_summer_sum = 0
+            tfm_summer_sum = 0
+            prcp_summer_sum = 0
+            prcp_sol_summer_sum = 0
+        yr_changes = m_end < m_start
+        if yr_changes:
+            m_summer_mb = np.concatenate([np.arange(m_start, 13, 1), np.arange(1, m_end, 1)])
+        else:
+            m_summer_mb = np.arange(m_start, m_end, 1)
+        for m in m_summer_mb:
+            if (m in np.arange(m_start, 13, 1)) and (yr_changes):
+                floatyr = utils.date_to_floatyear(year - 1, m)
+            else:
+                floatyr = utils.date_to_floatyear(year, m)
+            out = self.get_monthly_mb(heights, year=floatyr, add_climate=add_climate)
+            if m == m_summer_mb[0]:
+                ratio = ratio_m_start
+            elif m == m_summer_mb[-1]:
+                ratio = ratio_m_end
+            else:
+                # take the entire months if these
+                # are not starting or ending months
+                ratio = 1
+            if add_climate:
+                out, t, tfm, prcp, prcp_sol = out
+                t_summer_sum += t * ratio
+                tfm_summer_sum += tfm * ratio
+                prcp_summer_sum += prcp * ratio
+                prcp_sol_summer_sum += prcp_sol * ratio
+            mbs_summer += out * ratio
+            # mbs_winter += mb_winter_m
         mbs_summer = mbs_summer * self.SEC_IN_MONTH * self.rho
         if add_climate:
-            raise NotImplementedError('TODO: add_climate has to be implemented!')
-        return np.average(mbs_summer, weights=widths)
+            # we took the sum of the temperature of the winter months
+            # so now we need to divide by the amount of months
+            m_length_corrected = len(m_summer_mb) - 2 + ratio + ratio  # use the ratio of the winter MBs
+            t_winter_mean = np.array(t_summer_sum) / m_length_corrected
+            # need to correct the winter temp. mean
+            return (np.average(mbs_summer, weights=widths), t_winter_mean,
+                    np.array(tfm_summer_sum), np.array(prcp_summer_sum), np.array(prcp_sol_summer_sum))
+        else:
+            return np.average(mbs_summer, weights=widths)
 
 
 class TIModel(TIModel_Parent):
@@ -1864,9 +2055,9 @@ class TIModel(TIModel_Parent):
 
             mb_month = np.sum(mb_daily, axis=1)
             # more correct than using a mean value for days in a month
-            warnings.warn('there might be a problem with SEC_IN_MONTH'
-                          'as February changes amount of days inbetween the years'
-                          ' see test_monthly_glacier_massbalance()')
+            #warnings.warn('there might be a problem with SEC_IN_MONTH'
+            #              'as February changes amount of days inbetween the years'
+            #              ' see test_monthly_glacier_massbalance()')
         else:
             # get 1D values for each height, no dependency on days
             t, temp2dformelt, prcp, prcpsol = self.get_monthly_climate(heights, year=year)
@@ -1885,6 +2076,8 @@ class TIModel(TIModel_Parent):
                 prcpsol = prcpsol.sum(axis=1)
                 t = t.mean(axis=1)
                 temp2dformelt = temp2dformelt.sum(axis=1)
+            if self.mb_type == 'mb_pseudo_daily':
+                temp2dformelt = temp2dformelt.flatten()
             return (mb_month / SEC_IN_MONTH / self.rho, t, temp2dformelt,
                     prcp, prcpsol)
         # instead of SEC_IN_MONTH, use instead len(prcpsol.T)==daysinmonth
@@ -1892,7 +2085,10 @@ class TIModel(TIModel_Parent):
 
     def get_annual_mb(self, heights, year=None, add_climate=False,
                       **kwargs):
-        """ computes annual mass balance in m of ice per second !"""
+        """ computes annual mass balance in m of ice per second !
+        Attention: temperature for melt of add_climate
+        is either in sum over monthly mean or in annual sum (if real_daily)!
+        """
         # todo: can actually remove **kwargs???
         # comment: get_monthly_mb and get_annual_mb are only different
         # to OGGM default for mb_real_daily
@@ -1992,7 +2188,6 @@ class TIModel(TIModel_Parent):
         assert len(spec_mb) > 360
         return spec_mb
 
-
 class TIModel_Sfc_Type(TIModel_Parent):
     """ Temperature-Index model with surface type distinction using a bucket system
     (child class of TIModel_Parent)
@@ -2075,8 +2270,10 @@ class TIModel_Sfc_Type(TIModel_Parent):
         self.interpolation_optim = interpolation_optim
 
         self.tau_e_fold_yr = tau_e_fold_yr
-        assert tau_e_fold_yr > 0, "tau_e_fold_yr has to be above zero!"
+        if melt_f_change == 'neg_exp':
+            assert tau_e_fold_yr > 0, "tau_e_fold_yr has to be above zero!"
         self.melt_f_change = melt_f_change
+        assert melt_f_change in ['linear', 'neg_exp'], "melt_f_change has to be either 'linear' or 'neg_exp'"
         # ratio of snow melt_f to ice melt_f
         self.melt_f_ratio_snow_to_ice = melt_f_ratio_snow_to_ice
         self.melt_f_update = melt_f_update
@@ -2099,8 +2296,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # comment: I don't need an ice bucket because this is assumed to be "infinite"
         # (instead just have a 'delta_kg/m2' bucket)
 
-        # only have one flowline when using elevation bands
-        self.fl = gdir.read_pickle('inversion_flowlines')[-1]
         # save the inversion height to later check if the same height is applied!!!
         self.inv_heights = self.fl.surface_h
         self.check_availability = check_availability
@@ -2189,7 +2384,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
                                             self._melt_f +
                                             (melt_f_snow - self._melt_f) * np.exp(-time/self.tau_e_fold_yr)
                                             ))
-
 
     def reset_pd_mb_bucket(self,
                            init_model_fls='use_inversion_flowline'):
@@ -2630,8 +2824,6 @@ class TIModel_Sfc_Type(TIModel_Parent):
 
         """
 
-        if add_climate:
-            raise NotImplementedError('TODO: add_climate has to be implemented!')
         # when we set spinup_yrs to zero, then there should be no spinup occurring, even if spinup
         # is set to True
         if self.spinup_yrs == 0:
@@ -2669,7 +2861,15 @@ class TIModel_Sfc_Type(TIModel_Parent):
             if bucket_output:
                 raise InvalidWorkflowError('if you want to output the buckets, you need to do'
                                            'reset_pd_mb_bucket() and rerun')
-            return mb_annual
+
+            if add_climate:
+                t, temp2dformelt, prcp, prcpsol = self._get_2d_annual_climate(heights,
+                                                                              year)
+                return (mb_annual, t.mean(axis=1), temp2dformelt.sum(axis=1),
+                        prcp.sum(axis=1), prcpsol.sum(axis=1))
+                # raise NotImplementedError('TODO: add_climate has to be implemented!')
+            else:
+                return mb_annual
         else:
             # do we need to do the spinup beforehand
             # if any of the default 6 spinup years before was not computed,
@@ -2743,7 +2943,14 @@ class TIModel_Sfc_Type(TIModel_Parent):
             if bucket_output:
                 return mb_annual, pd_bucket
             else:
-                return mb_annual
+                if add_climate:
+                    t, temp2dformelt, prcp, prcpsol = self._get_2d_annual_climate(heights,
+                                                                                  year)
+                    return (mb_annual, t.mean(axis=1), temp2dformelt.sum(axis=1),
+                            prcp.sum(axis=1), prcpsol.sum(axis=1))
+                    #raise NotImplementedError('TODO: add_climate has to be implemented!')
+                else:
+                    return mb_annual
 
             #todo
             # if add_climate:
@@ -2830,6 +3037,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
                     raise InvalidWorkflowError('year should be a float with monthly climate resolution')
                 # year is here float year, so it corresponds to 1 month of a specific year
                 t, temp2dformelt, prcp, prcpsol = self.get_monthly_climate(heights, year)
+                if self.mb_type == 'mb_pseudo_daily':
+                    temp2dformelt = temp2dformelt.flatten()
                 return mb_month, t, temp2dformelt, prcp, prcpsol
             else:
                 return mb_month
@@ -2978,6 +3187,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
                         self.pd_mb_annual[int(year)] = self.pd_mb_monthly.loc[:, condi].mean(axis=1).values
 
             if add_climate and not bucket_output:
+                if self.mb_type == 'mb_pseudo_daily':
+                    temp2dformelt = temp2dformelt.flatten()
                 return mb_month, t, temp2dformelt, prcp, prcpsol
             elif bucket_output:
                 return mb_month, pd_bucket
@@ -3478,6 +3689,9 @@ class ConstantMassBalance_TIModel(MassBalanceModel):
         Note that prcp is corrected with the precipitation factor and that
         all other biases (precipitation, temp) are applied
 
+        Attention: temperature for melt of
+        is either in sum over monthly mean or in annual sum (if real_daily)!
+
         Returns
         -------
         (temp, tempformelt, prcp, prcpsol)
@@ -3716,6 +3930,9 @@ def fixed_geometry_mass_balance_TIModel(gdir, ys=None, ye=None,
                                 climate_filename='climate_historical',
                                 climate_input_filesuffix='',
                                 ds_gcm = None,
+                                        from_json = False,
+                                        json_filename='',
+                                        sfc_type=False,
                                 **kwargs):
     """Computes the mass-balance with climate input
     from e.g. CRU or a GCM.
@@ -3746,19 +3963,63 @@ def fixed_geometry_mass_balance_TIModel(gdir, ys=None, ye=None,
     **kwargs:
         added to MultipleFlowlineMassBalance_TIModel
     """
-
+    temp_bias = 0
+    if sfc_type == False or sfc_type == 'False':
+        mb_model_sub_class = TIModel
+        kwargs_for_TIModel_Sfc_Type = {}
+    else:
+        mb_model_sub_class = TIModel_Sfc_Type
+        kwargs_for_TIModel_Sfc_Type = {}
+        # try:
+        # melt_f_update =
+        # except:
+        #    melt_f_update = 'monthly'
+        kwargs_for_TIModel_Sfc_Type['melt_f_update'] = kwargs['melt_f_update']
+        kwargs_for_TIModel_Sfc_Type['melt_f_change'] = sfc_type
     if monthly_step:
         raise NotImplementedError('monthly_step not implemented yet')
-    if ds_gcm != None:
-        melt_f = ds_gcm.sel(rgi_id=gdir.rgi_id).melt_f.values
-        pf = ds_gcm.sel(rgi_id=gdir.rgi_id).pf.values
+    if ds_gcm != None or from_json:
+        if ds_gcm!=None:
+            melt_f = ds_gcm.sel(rgi_id=gdir.rgi_id).melt_f.values
+            pf = ds_gcm.sel(rgi_id=gdir.rgi_id).pf.values
+        elif from_json:
+            if sfc_type is not False:
+                if kwargs_for_TIModel_Sfc_Type['melt_f_update'] == 'annual':
+                    fs_new = '_{}_sfc_type_{}_annual_{}_{}'.format('W5E5', sfc_type, kwargs['mb_type'],
+                                                            kwargs['grad_type'])
+                else:
+                    fs_new = '_{}_sfc_type_{}_{}_{}'.format('W5E5', sfc_type, kwargs['mb_type'],
+                                                            kwargs['grad_type'])
+            else:
+                fs_new = '_{}_sfc_type_{}_{}_{}'.format('W5E5', sfc_type, kwargs['mb_type'],
+                                                    kwargs['grad_type'])
+            # json_filename = 'melt_f_geod_opt_winter_mb_approx_std'
+            # get the calibrated melt_f that suits to the prcp factor
+            try:
+                d = gdir.read_json(filename=json_filename,
+                                   filesuffix=fs_new)
+                # get the corrected ref_hgt so that we can apply this again on the mb model
+                # if otherwise not melt_f could be found!
+                pf = d['pf']
+                melt_f = d['melt_f']
+                temp_bias = d['temp_bias']
+            except:
+                raise InvalidWorkflowError(
+                    'there is no calibrated melt_f for this precipitation factor, glacier, climate'
+                    'mb_type and grad_type, need to run first melt_f_calib_geod_prep_inversion'
+                    'with these options!')
 
-        mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=TIModel,
+        mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=mb_model_sub_class,
+                                                 melt_f=melt_f, prcp_fac=pf,
                                                  filename=climate_filename,
                                                  use_inversion_flowlines=use_inversion_flowlines,
+                                                 bias=0,
                                                  input_filesuffix=climate_input_filesuffix,
-                                                 melt_f=melt_f, prcp_fac=pf,
-                                                 **kwargs)
+                                                 mb_type=kwargs['mb_type'],
+                                                 grad_type=kwargs['grad_type'],
+                                                 # check_calib_params=check_calib_params,
+                                                 **kwargs_for_TIModel_Sfc_Type)
+        mb.temp_bias = temp_bias
     else:
         mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=TIModel,
                                      filename=climate_filename,
@@ -3782,9 +4043,14 @@ def fixed_geometry_mass_balance_TIModel(gdir, ys=None, ye=None,
 @global_task(log)
 def compile_fixed_geometry_mass_balance_TIModel(gdirs, filesuffix='',
                                         path=True, csv=False,
+                                        climate_filename='climate_historical',
                                         use_inversion_flowlines=True,
                                         ys=None, ye=None, years=None,
+                                        climate_input_filesuffix='',
                                         ds_gcm=None,
+                                                from_json=False,
+                                                json_filename='',
+                                                sfc_type=False,
                                         **kwargs):
     """
     same as `compile_fixed_geometry_mass_balance` but compatible to TIModel
@@ -3815,14 +4081,20 @@ def compile_fixed_geometry_mass_balance_TIModel(gdirs, filesuffix='',
         end year of the model run (default: from the climate file)
     years : array of ints
         override ys and ye with the years of your choice
+    todo: other docs!
     """
     from oggm.workflow import execute_entity_task
     #from oggm.core.massbalance import fixed_geometry_mass_balance
 
     out_df = execute_entity_task(fixed_geometry_mass_balance_TIModel, gdirs,
+                                 climate_filename=climate_filename,
                                  use_inversion_flowlines=use_inversion_flowlines,
                                  ys=ys, ye=ye, years=years,
-                                 ds_gcm=ds_gcm, **kwargs)
+                                 ds_gcm=ds_gcm, from_json=from_json,
+                                 climate_input_filesuffix=climate_input_filesuffix,
+                                 json_filename=json_filename,
+                                 sfc_type=sfc_type,
+                                 **kwargs)
 
     for idx, s in enumerate(out_df):
         if s is None:

@@ -25,6 +25,7 @@ warnings.filterwarnings("once", category=DeprecationWarning)
 # %%
 
 class Test_climate_daily_datasets:
+    @pytest.mark.no_w5e5
     def test_ERA5_daily_dataset(self):
 
         dataset = 'ERA5_daily'
@@ -70,6 +71,7 @@ class Test_climate_daily_datasets:
         assert_allclose(ds_ERA5_daily_g.resample(time='1M').mean().t2m.values,
                         ds_ERA5_g.t2m.values, rtol=1e-4)
 
+    @pytest.mark.no_w5e5
     def test_WFDE5_W5E5_daily_dataset(self):
 
         dataset = 'WFDE5_CRU_daily'
@@ -173,6 +175,7 @@ class Test_climate_daily_datasets:
 
 class Test_process_era5_daily_wfde5_w5e5_hef:
 
+    @pytest.mark.no_w5e5
     def test_process_era5_daily_data(self, gdir):
         process_era5_daily_data(gdir, y0=1979, y1=2018)
 
@@ -230,6 +233,7 @@ class Test_process_era5_daily_wfde5_w5e5_hef:
             # cfg.PARAMS[hydro_month_nh = 10], this is in conflict with 8
             process_era5_daily_data(gdir, y0=1979, y1=2018, hydro_month_nh=8)
 
+    @pytest.mark.no_w5e5
     def test_process_w5e5_data(self, gdir):
 
         # first with daily resolution
@@ -360,7 +364,7 @@ class Test_process_era5_daily_wfde5_w5e5_hef:
             # cfg.PARAMS[hydro_month_nh = 1], this is in conflict with 8
             process_era5_daily_data(gdir, y0=1979, y1=2018, hydro_month_nh=8)
 
-
+    @pytest.mark.no_w5e5
     def test_process_mswep_data(self, gdir):
 
         # first with daily resolution

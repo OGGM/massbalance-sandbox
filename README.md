@@ -80,6 +80,10 @@ Test the installation via pytest while being in the massbalance-sandbox folder:
 
     $ pytest .
 
+(Attention, this can take a long time. As it downloads several climate datasets and example ensemble projections into the future. If you only want to use W5E5 climate data, run instead:
+
+    $ pytest -v -m "not no_w5e5"
+
 The MBsandbox package can be imported in python by
 
     >>> import MBsandbox
