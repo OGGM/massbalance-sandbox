@@ -52,6 +52,8 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
                                   kwargs_for_TIModel_Sfc_Type={},
                                   reset=True,
                                   no_qc=False,
+                                  all_from_json = False,
+                                  json_filename='',
                                   **kwargs):
     """ Runs a glacier with climate input from e.g. W5E5 or a GCM.
 
@@ -129,6 +131,11 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
     no_qc : boolean
         default is False (so qc is done if melt_f comes not from json).
         but can be set to True if no quality check is wanted when melt_f is set directly!
+    all_from_json : boolean
+        take temp. bias, prcp. fac and melt_f from json file.
+        That json file is used which starts with json_filename
+    json_filename : string
+        this is one of the calibration options, e.g. : 'calib_only_geod_temp_b_0_pf_fit_via_winter_mb'
     kwargs : dict
         kwargs to pass to the FluxBasedModel instance
     """
@@ -137,7 +144,6 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
     if init_model_filesuffix is not None:
         fp = gdir.get_filepath('model_geometry',
                                filesuffix=init_model_filesuffix)
-
         fmod = FileModel(fp)
         if init_model_yr is None:
             init_model_yr = fmod.last_yr
@@ -173,6 +179,7 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
 
     if melt_f == 'from_json':
         fs = '_{}_{}_{}'.format(climate_type, mb_type, grad_type)
+
         d = gdir.read_json(filename='melt_f_geod', filesuffix=fs)
         # get the calibrated melt_f that suits to the prcp factor
         try:
@@ -188,6 +195,38 @@ def run_from_climate_data_TIModel(gdir, ys=None, ye=None, min_ys=None,
         #melt_f_chosen = pd_inv_melt_f['melt_f_opt'].loc[gdir.rgi_id]
         # use same pf as from initialisation and calibration
         #np.testing.assert_allclose(precipitation_factor, pd_inv_melt_f['pf'])
+
+    elif all_from_json:
+        if kwargs_for_TIModel_Sfc_Type == {}:
+            sfc_type = False
+        else:
+            sfc_type = kwargs_for_TIModel_Sfc_Type['melt_f_change']
+
+        if (sfc_type is not False) and (sfc_type is not 'False'):
+            if kwargs_for_TIModel_Sfc_Type['melt_f_update'] == 'annual':
+                fs_new = '_{}_sfc_type_{}_annual_{}_{}'.format('W5E5', sfc_type, mb_type,
+                                                        grad_type)
+            else:
+                fs_new = '_{}_sfc_type_{}_{}_{}'.format('W5E5', sfc_type, mb_type,
+                                                         grad_type)
+        else:
+            fs_new = '_{}_sfc_type_{}_{}_{}'.format('W5E5', sfc_type, mb_type,
+                                                grad_type)
+        # json_filename = 'melt_f_geod_opt_winter_mb_approx_std'
+        # get the calibrated melt_f that suits to the prcp factor
+        try:
+            d = gdir.read_json(filename=json_filename,
+                               filesuffix=fs_new)
+            # get the corrected ref_hgt so that we can apply this again on the mb model
+            # if otherwise not melt_f could be found!
+            precipitation_factor = d['pf']
+            melt_f_chosen = d['melt_f']
+            temperature_bias = d['temp_bias']
+        except:
+            raise InvalidWorkflowError(
+                'there is no calibrated melt_f for this precipitation factor, glacier, climate'
+                'mb_type and grad_type, need to do the calibration first!')
+
     else:
         melt_f_chosen = melt_f
 
