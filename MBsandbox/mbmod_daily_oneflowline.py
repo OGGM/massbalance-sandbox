@@ -2200,7 +2200,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
                  melt_f_ratio_snow_to_ice=0.5,
                  melt_f_update='annual',
                  spinup_yrs=6,
-                 tau_e_fold_yr=0.5,
+                 tau_e_fold_yr=1,  #0.5,
                  melt_f_change='linear',
                  check_availability=True,
                  interpolation_optim=False,
@@ -2233,7 +2233,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
             to be filled (as we have 1 snow bucket and 5 firn buckets, or
             72 monthly buckets)
         tau_e_fold_yr : float
-            default is 0.5, only used if melt_f_change is 'neg_exp',
+            default is 1, (before it was set to 0.5!!!)
+            only used if melt_f_change is 'neg_exp',
             it describes how fast the snow melt
             factor approximates to the ice melt factor via
             melt_f = melt_f_ice + (melt_f_snow - melt_f_ice)* np.exp(-time_yr/tau_e_fold_yr) # s: in months
@@ -3976,6 +3977,7 @@ def fixed_geometry_mass_balance_TIModel(gdir, ys=None, ye=None,
         #    melt_f_update = 'monthly'
         kwargs_for_TIModel_Sfc_Type['melt_f_update'] = kwargs['melt_f_update']
         kwargs_for_TIModel_Sfc_Type['melt_f_change'] = sfc_type
+        kwargs_for_TIModel_Sfc_Type['tau_e_fold_yr'] = kwargs['tau_e_fold_yr']
     if monthly_step:
         raise NotImplementedError('monthly_step not implemented yet')
     if ds_gcm != None or from_json:
@@ -4006,8 +4008,7 @@ def fixed_geometry_mass_balance_TIModel(gdir, ys=None, ye=None,
             except:
                 raise InvalidWorkflowError(
                     'there is no calibrated melt_f for this precipitation factor, glacier, climate'
-                    'mb_type and grad_type, need to run first melt_f_calib_geod_prep_inversion'
-                    'with these options!')
+                    'mb_type and grad_type, need to do the calibration first!')
 
         mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=mb_model_sub_class,
                                                  melt_f=melt_f, prcp_fac=pf,
