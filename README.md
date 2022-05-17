@@ -72,6 +72,7 @@ e.g. do:
     $ git clone  https://github.com/OGGM/oggm.git
     $ cd oggm 
     $ pip install -e .
+    $ cd .. 
     $ git clone https://github.com/OGGM/massbalance-sandbox
     $ cd massbalance-sandbox
     $ pip install -e .
