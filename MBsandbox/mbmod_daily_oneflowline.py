@@ -482,6 +482,7 @@ def process_w5e5_data(gdir, y0=None, y1=None, temporal_resol='daily',
         elif climate_type[:4] == 'W5E5':
             if y1 > 2019 or y0 < 1979:
                 text = 'The climate files only go from 1979 --2019, something is wrong'
+                raise InvalidParamsError(text)
         # if default settings: this is the last day in March or September
         time_f = '{}-{:02d}'.format(y1, em)
         end_day = int(ds.sel(time=time_f).time.dt.daysinmonth[-1].values)

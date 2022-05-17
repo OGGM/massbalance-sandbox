@@ -802,7 +802,9 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
                                                             path='/home/lilianschuster/Schreibtisch/PhD/bayes_2022/calib_winter_mb/test_run',
                                                             pf_cte_dict=False,
                                                             optimize_std_quot=True,
-                                                            pf_cte_via= ''):
+                                                            pf_cte_via= '',
+                                                            t_melt=0
+                                                            ):
     ''' todo: do documentation '''
     j = 0
     # sfc_type_distinction types
@@ -896,7 +898,8 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
                                              baseline_climate=climate_type,
                                              melt_f_ratio_snow_to_ice=0.5, melt_f_update=melt_f_update,
                                              melt_f_change=melt_f_change,
-                                             tau_e_fold_yr=tau_e_fold_yr
+                                             tau_e_fold_yr=tau_e_fold_yr,
+                                             t_melt=t_melt
                                              )
                 else:
                     gd_mb = TIModel(gdir, 200,
@@ -904,6 +907,7 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
                                     mb_type=mb_type,
                                     grad_type=grad_type,
                                     baseline_climate=climate_type,
+                                    t_melt=t_melt
                                     )
 
                 if not sfc_type_distinction and melt_f_change == 'neg_exp':
@@ -1865,6 +1869,7 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir,
                                                              temp_b_range = np.arange(-4, 4.1, 2),  # np.arange(-6,6.1,0.5)
                                                              method='pre-check', melt_f_update='monthly',
                                                              sfc_type_distinction=True,
+                                                                  t_melt=0,
                                                              path = '/home/lilianschuster/Schreibtisch/PhD/bayes_2022/calib_winter_mb/test_run'):
     ''' todo: do documentation
     here only monthly melt_f_update  makes sense!!!
@@ -1961,7 +1966,8 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir,
                                              baseline_climate=climate_type,
                                              melt_f_ratio_snow_to_ice=0.5, melt_f_update=melt_f_update,
                                              melt_f_change=melt_f_change,
-                                             tau_e_fold_yr=tau_e_fold_yr
+                                             tau_e_fold_yr=tau_e_fold_yr,
+                                             t_melt=t_melt
                                              )
                 else:
                     gd_mb = TIModel(gdir, 200,
@@ -1969,6 +1975,7 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir,
                                     mb_type=mb_type,
                                     grad_type=grad_type,
                                     baseline_climate=climate_type,
+                                    t_melt=t_melt
                                     )
 
                 if not sfc_type_distinction and melt_f_change == 'neg_exp':
