@@ -692,13 +692,13 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
                         climate_historical_filesuffix='',
                         ensemble='mri-esm2-0_r1i1p1f1',
                         # from temperature tie series the "median" ensemble
-                        ssp='ssp126', flat=True,
+                        ssp='ssp126',
                         temporal_resol='monthly',
                         cluster=False,
                         year_range=('1979', '2014'),
                         correct=True,
                         **kwargs):
-    """Read, process and store the isimip climate data for this glacier.
+    """Read, process and store the isimip3b gcm data for this glacier.
 
     It stores the data in a format that can be used by the OGGM mass balance
     model and in the glacier directory.
@@ -752,15 +752,15 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
                 fpath_precip, fpath_precip_h]:
         if temporal_resol == 'monthly':
             if cluster:
-                path = '/home/www/lschuster/isimip3b_flat/flat/monthly/'
+                path = '/home/www/oggm/cmip6/isimip3b/flat/monthly/'
             else:
-                path = 'https://cluster.klima.uni-bremen.de/~lschuster/isimip3b_flat/flat/monthly/'
+                path = 'https://cluster.klima.uni-bremen.de/~oggm/cmip6/isimip3b/flat/monthly/'
             add = '_global_monthly_flat_glaciers.nc'
         elif temporal_resol == 'daily':
             if cluster:
-                path = '/home/www/lschuster/isimip3b_flat/flat/daily/'
+                path = '/home/www/oggm/cmip6/isimip3b/flat/daily/'
             else:
-                path = 'https://cluster.klima.uni-bremen.de/~lschuster/isimip3b_flat/flat/daily/'
+                path = 'https://cluster.klima.uni-bremen.de/~oggm/cmip6/isimip3b/flat/daily/'
             add = '_global_daily_flat_glaciers.nc'
 
         fpath_spec = path + '{}_w5e5_'.format(ensemble) + '{ssp}_{var}' + add
@@ -783,26 +783,6 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
 
             fpath_precip = utils.file_downloader(fpath_precip)
             fpath_precip_h = utils.file_downloader(fpath_precip_h)
-    # # need to aggregate first both gcm types !!!!
-    # if flat:
-    #     add = '_global_monthly_flat_glaciers.nc'
-    #     fpath_temp_gcm = fpath_temp+ '{}_w5e5_{}_tasAdjust_{}'.format(ensemble, ssp, add)
-    #     fpath_temp_historical = fpath_temp+ '{}_w5e5_historical_tasAdjust_{}'.format(ensemble, add)
-    #
-    #     fpath_temp_std_gcm = fpath_temp_std+ '{}_w5e5_{}_tasAdjust_std_{}'.format(ensemble, ssp, add)
-    #     fpath_temp_std_historical = fpath_temp_std+ '{}_w5e5_historical_tasAdjust_std_{}'.format(ensemble, add)
-    #
-    #     fpath_prcp_gcm = fpath_precip+ '{}_w5e5_{}_prAdjust_{}'.format(ensemble, ssp, add)
-    #     fpath_prcp_historical = fpath_precip+ '{}_w5e5_historical_prAdjust_{}'.format(ensemble, add)
-    # else:
-    #     fpath_temp_gcm = fpath_temp+ '{}_w5e5_{}_tasAdjust_global_monthly_2015_2100.nc'.format(ensemble, ssp)
-    #     fpath_temp_historical = fpath_temp+ '{}_w5e5_historical_tasAdjust_global_monthly_1850_2014.nc'.format(ensemble)
-    #
-    #     fpath_temp_std_gcm = fpath_temp_std+ '{}_w5e5_{}_tasAdjust_std_global_monthly_2015_2100.nc'.format(ensemble, ssp)
-    #     fpath_temp_std_historical = fpath_temp_std+ '{}_w5e5_historical_tasAdjust_std_global_monthly_1850_2014.nc'.format(ensemble)
-    #
-    #     fpath_prcp_gcm = fpath_precip+ '{}_w5e5_{}_prAdjust_global_monthly_2015_2100.nc'.format(ensemble, ssp)
-    #     fpath_prcp_historical = fpath_precip+ '{}_w5e5_historical_prAdjust_global_monthly_1850_2014.nc'.format(ensemble)
 
     # Read the GCM files
     with xr.open_dataset(fpath_temp_h, use_cftime=True) as tempds_hist, \
@@ -823,17 +803,14 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
         temp_a_hist = tempds_hist.isel(points=c.argmin())
         # merge historical with gcm together
         # TODO: change to drop_conflicts when xarray version v0.17.0 can
-        # be used with salem
+        #  be used with salem
         temp_a = xr.merge([temp_a_gcm, temp_a_hist],
                           combine_attrs='override')
         temp = temp_a.tasAdjust
         temp['lon'] = temp_a.longitude
         temp['lat'] = temp_a.latitude
-        # except ValueError:
-        #    temp = tempds.tasAdjust.sel(latitude=glat, longitude=glon,
-        #                                method='nearest')
+
         temp.lon.values = temp.lon if temp.lon <= 180 else temp.lon - 360
-        # tempds.close()
 
     with xr.open_dataset(fpath_precip_h, use_cftime=True) as precipds_hist, \
             xr.open_dataset(fpath_precip, use_cftime=True) as precipds_gcm:
@@ -859,9 +836,6 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
             temp_std.lon.values = temp_std.lon if temp_std.lon <= 180 \
                 else temp.lon - 360
 
-        # precipds = xr.merge([precipds_gcm, precipds_hist],
-        #                    combine_attrs='override')
-        # try:
         c = (precipds_gcm.longitude - glon) ** 2 + (
                     precipds_gcm.latitude - glat) ** 2
         precip_a_gcm = precipds_gcm.isel(points=c.argmin())
@@ -875,16 +849,12 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
             precip = precip_a.tp
         precip['lon'] = precip_a.longitude
         precip['lat'] = precip_a.latitude
-        # except ValueError:
-        #    precip = precipds.prAdjust.sel(latitude=glat,
-        #                                    longitude=glon, method='nearest')
-        # precipds.close()
+
         # Back to [-180, 180] for OGGM
         precip.lon.values = precip.lon if precip.lon <= 180 \
             else precip.lon - 360
 
         # Convert kg m-2 s-1 to mm mth-1 => 1 kg m-2 = 1 mm !!!
-
         if temporal_resol == 'monthly':
             assert 'kg m-2 s-1' in precip.units, \
                 'Precip units not understood'
@@ -904,8 +874,6 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
             # for daily: precip is already converted to mm/day during flattening
             # check this
             assert 'mm/day' in precip.units
-            # precip = precip * (60*60*24)
-        # print(len(precip)
 
     if temporal_resol == 'monthly':
         process_gcm_data_adv_monthly(gdir,
