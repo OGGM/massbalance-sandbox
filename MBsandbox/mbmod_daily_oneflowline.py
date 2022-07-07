@@ -4083,6 +4083,8 @@ def compile_fixed_geometry_mass_balance_TIModel(gdirs, filesuffix='',
         end year of the model run (default: from the climate file)
     years : array of ints
         override ys and ye with the years of your choice
+    kwargs :
+        passed to fixed_geometry_mass_balance_TIModel
     todo: other docs!
     """
     from oggm.workflow import execute_entity_task
