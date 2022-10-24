@@ -33,7 +33,7 @@ if cluster == True:
 
 print(start_ind, end_ind, historical_dataset)
 ###############################
-import pymc3 as pm
+import pymc as pm
 # 	conda install -c conda-forge python-graphviza
 import pandas as pd
 
