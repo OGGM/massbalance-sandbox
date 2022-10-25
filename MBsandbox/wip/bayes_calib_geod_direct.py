@@ -1,4 +1,3 @@
-import pymc3 as pm
 # 	conda install -c conda-forge python-graphviza
 import numpy as np
 import pandas as pd
@@ -21,14 +20,18 @@ import oggm
 from oggm import cfg, utils, workflow, tasks, graphics
 from oggm.core import massbalance, flowline
 
-# import aesara.tensor as aet
-# import aesara
 
 # from drounce_analyze_mcmc import effective_n, mcse_batchmeans
-# plotting bayesian stuff
-import arviz as az
-
-az.rcParams['stats.hdi_prob'] = 0.95
+try:
+    import pymc as pm
+    import aesara
+    import aesara.tensor as aet
+    # from drounce_analyze_mcmc import effective_n, mcse_batchmeans
+    # plotting bayesian stuff
+    import arviz as az
+    az.rcParams['stats.hdi_prob'] = 0.95
+except:
+    pass  # for most things we do not need pymc to be installed
 
 # import the MSsandbox modules
 from MBsandbox.mbmod_daily_oneflowline import process_era5_daily_data, TIModel, \
@@ -39,8 +42,7 @@ from MBsandbox.help_func import compute_stat, minimize_bias, \
 from MBsandbox.wip.help_func_geodetic import minimize_bias_geodetic, \
     optimize_std_quot_brentq_geod, get_opt_pf_melt_f
 
-import theano
-import theano.tensor as aet
+
 
 
 # general parameters
@@ -281,7 +283,7 @@ def bayes_dummy_model_better(uniform,
             # increased target_accept because of divergences ...
         #                 #start={'pf':2.5, 'melt_f': 200})
         elif sampler == 'jax':
-            import pymc3.sampling_jax
+            import pymc.sampling_jax
             trace = pm.sampling_jax.sample_numpyro_nuts(20000, chains=3,
                                                         tune=20000,
                                                         target_accept=0.98)  # , compute_convergence_checks= True)
@@ -483,7 +485,6 @@ def bayes_dummy_model_better_OLD(uniform,
                               return_inferencedata=True)
         #                 #start={'pf':2.5, 'melt_f': 200})
         elif sampler == 'jax':
-            import pymc3.sampling_jax
             trace = pm.sampling_jax.sample_numpyro_nuts(20000, chains=4,
                                                         tune=20000,
                                                         target_accept=0.98)  # , compute_convergence_checks= True)
@@ -683,7 +684,6 @@ def bayes_dummy_model_ref_std(uniform,
                               return_inferencedata=True)
         #                 #start={'pf':2.5, 'melt_f': 200})
         elif sampler == 'jax':
-            import pymc3.sampling_jax
             trace = pm.sampling_jax.sample_numpyro_nuts(20000, chains=4,
                                                         tune=20000,
                                                         target_accept=0.98)  # , compute_convergence_checks= True)
@@ -793,7 +793,6 @@ def bayes_dummy_model_ref(uniform,
                               return_inferencedata=True)
         #                 #start={'pf':2.5, 'melt_f': 200})
         elif sampler == 'jax':
-            import pymc3.sampling_jax
             trace = pm.sampling_jax.sample_numpyro_nuts(20000, chains=4,
                                                         tune=20000,
                                                         target_accept=0.98)  # , compute_convergence_checks= True)
