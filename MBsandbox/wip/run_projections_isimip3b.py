@@ -40,7 +40,7 @@ if step == 'run_proj':
 #    grad_type = str(sys.argv[4])
 #print(type(start_ind), type(end_ind), mb_type, grad_type)
 ###############################
-import pymc3 as pm
+import pymc as pm
 # 	conda install -c conda-forge python-graphviza
 import pandas as pd
 import xarray as xr
@@ -82,8 +82,8 @@ cfg.PATHS['working_dir'] = working_dir
 base_url = ('https://cluster.klima.uni-bremen.de/~oggm/gdirs/oggm_v1.4/'
             'L1-L2_files/elev_bands')
 
-import theano
-import theano.tensor as aet
+import aesara
+import aesara.tensor as aet
 
 
 from oggm.shop import gcm_climate

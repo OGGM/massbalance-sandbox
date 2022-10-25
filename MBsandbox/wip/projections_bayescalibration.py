@@ -1,5 +1,4 @@
-import pymc3 as pm
-# 	conda install -c conda-forge python-graphviza
+
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -22,16 +21,24 @@ from oggm.core import massbalance, flowline
 from oggm import entity_task
 
 from oggm.core.flowline import FileModel
-# import aesara.tensor as aet
-# import aesara
+
 
 from oggm.exceptions import InvalidParamsError, InvalidWorkflowError
 from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH, SEC_IN_DAY
 import warnings
-# from drounce_analyze_mcmc import effective_n, mcse_batchmeans
-# plotting bayesian stuff
-import arviz as az
-az.rcParams['stats.hdi_prob'] = 0.95
+
+
+try:
+    import pymc as pm
+    import aesara
+    import aesara.tensor as aet
+    # from drounce_analyze_mcmc import effective_n, mcse_batchmeans
+    # plotting bayesian stuff
+    import arviz as az
+    az.rcParams['stats.hdi_prob'] = 0.95
+except:
+    pass  # for most things we do not need pymc to be installed
+# 	conda install -c conda-forge python-graphviza
 
 # import the MSsandbox modules
 from MBsandbox.mbmod_daily_oneflowline import process_era5_daily_data, TIModel, \
@@ -39,8 +46,7 @@ from MBsandbox.mbmod_daily_oneflowline import process_era5_daily_data, TIModel, 
 from MBsandbox.help_func import compute_stat, minimize_bias, \
     optimize_std_quot_brentq
 
-import theano
-import theano.tensor as aet
+
 
 from MBsandbox.mbmod_daily_oneflowline import \
     MultipleFlowlineMassBalance_TIModel
