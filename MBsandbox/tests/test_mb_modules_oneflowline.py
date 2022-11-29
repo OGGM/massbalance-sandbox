@@ -2153,7 +2153,8 @@ class Test_directobs_hydro10:
         N = 100
         h, w = gdir.get_inversion_flowline_hw()
         fls = gdir.read_pickle('inversion_flowlines')
-        assert_allclose(gdir.rgi_area_m2, np.sum(w * gdir.grid.dx * fls[0].dx))
+        assert_allclose(gdir.rgi_area_m2,
+                        np.sum(w * gdir.grid.dx * fls[0].dx))
 
         # do this for all model types
         # ONLY TEST it for ERA5dr or ERA5_daily!!!
@@ -2401,13 +2402,14 @@ class Test_directobs_hydro10:
 
     # %%
 
-    def test_N(self, gdir):
+    def test_pseudo_daily_N_temp_std_const_from_hist(self, gdir):
         # tests whether modelled mb_pseudo_daily massbalances of different values of N
         # is similar to observed mass balances
+        # and tests if temp_std_const_from_hist works as it should
 
         # this could be optimised and included in the above tests
-
-        cfg.PARAMS['hydro_month_nh'] = 10
+        # ok, I had to set the hydro month to 1 here, as only then temp_std_const_from_hist is implemented
+        cfg.PARAMS['hydro_month_nh'] = 1
         climate = 'ERA5dr'
         mb_type = 'mb_pseudo_daily'
         cfg.PARAMS['baseline_climate'] = 'ERA5dr'
@@ -2427,22 +2429,40 @@ class Test_directobs_hydro10:
 
             tot_mbN = {}
             for N in [1000, 500, 100, 50]:
-                mb_mod = TIModel(gdir, mu_star_opt[mb_type],
-                                 mb_type=mb_type,
-                                 prcp_fac=pf, N=N,
-                                 t_solid=0, t_liq=2, t_melt=0,
-                                 default_grad=-0.0065,
-                                 grad_type=grad_type,
-                                 baseline_climate=climate)
-                # check climate and adapt if necessary
-                mb_mod.historical_climate_qc_mod(gdir)
+                for temp_std_const_from_hist in [False, True]:
+                    mb_mod = TIModel(gdir, mu_star_opt[mb_type],
+                                     mb_type=mb_type,
+                                     temp_std_const_from_hist=temp_std_const_from_hist,
+                                     prcp_fac=pf, N=N,
+                                     t_solid=0, t_liq=2, t_melt=0,
+                                     default_grad=-0.0065,
+                                     grad_type=grad_type,
+                                     baseline_climate=climate)
+                    # check climate and adapt if necessary
+                    mb_mod.historical_climate_qc_mod(gdir)
 
-                tot_mbN[N] = mb_mod.get_specific_mb(heights=hgts,
-                                                    widths=widths,
-                                                    year=mbdf.index.values)
+                    tot_mbN = mb_mod.get_specific_mb(heights=hgts,
+                                                        widths=widths,
+                                                        year=mbdf.index.values)
+                    if temp_std_const_from_hist:
+                        tol = 30
+                        temp_std_cte = mb_mod.temp_std
+                    else:
+                        tol = 25
+                        temp_std_real = mb_mod.temp_std
 
-                assert np.abs(utils.md(tot_mbN[N],
-                                       mbdf['ANNUAL_BALANCE'])) < 10
+                    # even if we calibrated with variable daily_temp_std,
+                    # it should still give approximately the same estimates when
+                    # using temp_std_const_from_hist=True
+                    assert np.abs(utils.md(tot_mbN,
+                                           mbdf['ANNUAL_BALANCE'])) < tol
+        # every 12th entry should be the same if using temp_std_const_from_hist=True
+        assert np.all(np.concatenate([temp_std_cte[0:12]] * 40) == temp_std_cte)
+        # the temp_std_cte should be averages from temp_std_real grouped by month
+        # over time period 2000-2019
+        for m in np.arange(0, 12, 1):
+            np.testing.assert_allclose(temp_std_real[(mb_mod.years >= 2000)][m::12].mean(),
+                                              temp_std_cte[m], rtol=1e-5)
 
     def test_prcp_fac_update(self, gdir):
 

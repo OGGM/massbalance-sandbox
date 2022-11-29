@@ -870,6 +870,7 @@ class TIModel_Parent(MassBalanceModel):
 
     def __init__(self, gdir, melt_f, prcp_fac=2.5, residual=0,
                  mb_type='mb_pseudo_daily', N=100, loop=False,
+                 temp_std_const_from_hist = False,
                  grad_type='cte', filename='climate_historical',
                  repeat=False, ys=None, ye=None,
                  t_solid=0, t_liq=2, t_melt=0,
@@ -880,6 +881,7 @@ class TIModel_Parent(MassBalanceModel):
                  SEC_IN_DAY=SEC_IN_DAY,
                  baseline_climate=None,
                  input_filesuffix='default',
+                 input_filesuffix_h_for_temp_std = '_monthly_W5E5'
                  ):
         """ Initialize.
         Parameters
@@ -921,6 +923,11 @@ class TIModel_Parent(MassBalanceModel):
             'var_an_cycle' (varies spatially and over annual cycle,
                             but constant over the years)
             'var' (varies spatially & temporally as in the climate files, deprecated!)
+        temp_std_const_from_hist : boolean, optional
+            whether a variable temp_std is used or one that is constant but just change
+            for each month of the year (avg. over calib period 2000-2019). Only is used
+            in combination with mb_type='mb_pseudo_daily'. If set to True, mb_pseudo_daily
+            is more similar to the approach inside of GloGEM, GloGEMFlow ...
         filename : str, optional
             set it to a different BASENAME if you want to use alternative climate
             data, default is 'climate_historical'
@@ -967,6 +974,12 @@ class TIModel_Parent(MassBalanceModel):
             baseline_climate, but can change this here,
             e.g. change it to '' to work without filesuffix as
             default in oggm PastMassBalance
+        input_filesuffix_h_for_temp_std : str
+            historical climate_historical filesuffix which was used for calibration,
+            only used if  filename is not
+            climate_historical and if mb_type = 'mb_pseudo_daily' and if
+            temp_std_const_from_hist is True. It is then necessary to get the 12 monthly
+            daily std from the historical climate file.
 
         Attributes
         ----------
@@ -1077,7 +1090,26 @@ class TIModel_Parent(MassBalanceModel):
                 self.temp_std = np.NaN
             else:
                 try:
-                    self.temp_std = xr_nc['temp_std'].values.astype(np.float64)
+                    if temp_std_const_from_hist:
+                        # really take the temp_std from historical calibration time period!!!
+                        # this has to take the historical data even if we look here into gcm data
+                        if int(xr_nc.time[0].dt.month.values) != 1 or cfg.PARAMS[f'hydro_month_{self.hemisphere}'] != 1:
+                            raise InvalidWorkflowError('temp_std_const_from_hist is only implemented and tested'
+                                                       'with hydro_month = 1')
+                        if filename == 'climate_historical':
+                            xr_nc_h = xr_nc
+                        else:
+                            fpath_h = gdir.get_filepath('climate_historical',
+                                                        filesuffix=input_filesuffix_h_for_temp_std)
+                            xr_nc_h = xr.open_dataset(fpath_h)
+                        n_yrs = len(xr_nc_h.time.groupby('time.year').mean())
+                        temp_std_cte = xr_nc_h['temp_std'].sel(time=slice('2000',
+                                                                          '2020')).groupby('time.month').mean()
+                        self.temp_std = np.concatenate([temp_std_cte.values.astype(np.float64)] * n_yrs)
+                        #xr_nc_h.close()
+                    else:
+                        self.temp_std = xr_nc['temp_std'].values.astype(np.float64)
+
                 except KeyError:
                     text = ('The applied climate has no temp std, do e.g.'
                             'oggm.shop.ecmwf.process_ecmwf_data'
@@ -1621,7 +1653,7 @@ class TIModel_Parent(MassBalanceModel):
         else:
             raise InvalidParamsError('mb_type can only be "mb_monthly,\
                                      mb_pseudo_daily or mb_real_daily" ')
-        #  replace all values below zero to zero
+        # replace all values below zero to zero
         # todo: exectime this is also quite expensive
         clip_min(tempformelt, 0, out=tempformelt)
 
@@ -1741,7 +1773,7 @@ class TIModel_Parent(MassBalanceModel):
             else:
                 # just a bit arbitrarily
                 m_start = 4
-                m_end = 10 +1
+                m_end = 10 + 1
             ratio_m_start = 1
             ratio_m_end = 1
 
