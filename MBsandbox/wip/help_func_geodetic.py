@@ -21,7 +21,7 @@ from MBsandbox.help_func import (compute_stat, minimize_bias,
 from MBsandbox.help_func import minimize_bias_geodetic, optimize_std_quot_brentq_geod
 
 
-def get_opt_pf_melt_f(gd, mb_type='mb_monthly', grad_type='cte',
+def get_opt_pf_melt_f(gd, mb_typef='mb_monthly', grad_type='cte',
                       pd_calib_opt=None,
                       pd_geodetic=None, dataset='ERA5'):
     if type(pd_calib_opt) == pd.core.frame.DataFrame:
