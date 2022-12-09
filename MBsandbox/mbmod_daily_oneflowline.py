@@ -995,6 +995,12 @@ class TIModel_Parent(MassBalanceModel):
         """
         # melt_f is only initiated here, and not used in __init__
         # so it does not matter if it is changed
+        # just enforce it then it is easier for run_from_climate_data ...
+        if mb_type == 'mb_pseudo_daily_fake':
+            temp_std_const_from_hist = True
+            mb_type = 'mb_pseudo_daily'
+        self.mb_type = mb_type
+
         self._melt_f = melt_f
         if self._melt_f != None and self._melt_f <= 0:
             raise InvalidParamsError('melt_f has to be above zero!')
@@ -1018,13 +1024,6 @@ class TIModel_Parent(MassBalanceModel):
         self.t_liq = t_liq
         self.t_melt = t_melt
         self.N = N
-
-        # just enforce it then it is easier for run_from_climate_data ... 
-        if mb_type == 'mb_pseudo_daily_fake':
-            temp_std_const_from_hist = True
-            self.mb_type = 'mb_pseudo_daily'
-        else:
-            self.mb_type = mb_type
 
         self.loop = loop
         self.grad_type = grad_type
