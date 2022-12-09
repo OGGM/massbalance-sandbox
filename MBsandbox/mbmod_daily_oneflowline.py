@@ -1018,7 +1018,14 @@ class TIModel_Parent(MassBalanceModel):
         self.t_liq = t_liq
         self.t_melt = t_melt
         self.N = N
-        self.mb_type = mb_type
+
+        # just enforce it then it is easier for run_from_climate_data ... 
+        if mb_type == 'mb_pseudo_daily_fake':
+            temp_std_const_from_hist = True
+            self.mb_type = 'mb_pseudo_daily'
+        else:
+            self.mb_type = mb_type
+
         self.loop = loop
         self.grad_type = grad_type
         # default rho is 900  kg/m3
