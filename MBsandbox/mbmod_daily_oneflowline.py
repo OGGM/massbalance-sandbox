@@ -1108,11 +1108,13 @@ class TIModel_Parent(MassBalanceModel):
                             fpath_h = gdir.get_filepath('climate_historical',
                                                         filesuffix=input_filesuffix_h_for_temp_std)
                             xr_nc_h = xr.open_dataset(fpath_h)
-                        n_yrs = len(xr_nc_h.time.groupby('time.year').mean())
+                        # here we need to have the lenth of used climate file (which can be the gcm file)
+                        # so, we need xr_nc and not xr_nc_h !!!
+                        n_yrs = len(xr_nc.time.groupby('time.year').mean())
                         temp_std_cte = xr_nc_h['temp_std'].sel(time=slice('2000',
                                                                           '2020')).groupby('time.month').mean()
                         self.temp_std = np.concatenate([temp_std_cte.values.astype(np.float64)] * n_yrs)
-                        #xr_nc_h.close()
+                        xr_nc_h.close()
                     else:
                         self.temp_std = xr_nc['temp_std'].values.astype(np.float64)
 
