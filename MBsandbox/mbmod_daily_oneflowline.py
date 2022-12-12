@@ -20,6 +20,7 @@ import warnings
 import scipy.stats as stats
 import logging
 import copy
+from scipy import optimize as optimization
 
 # imports from oggm
 from oggm import entity_task
@@ -3242,6 +3243,43 @@ class TIModel_Sfc_Type(TIModel_Parent):
 
     def get_daily_mb(self):
         raise NotImplementedError('this has not been implemented with surface type distinction')
+
+    def get_ela(self, year=None, **kwargs):
+        """Compute the equilibrium line altitude for a given year.
+
+        copied and adapted from OGGM main -> had to remove the invalid ELA check, as it won't work
+        together with sfc type distinction
+
+        Parameters
+        ----------
+        year: float, optional
+            the time (in the "hydrological floating year" convention)
+        **kwargs: any other keyword argument accepted by self.get_annual_mb
+        Returns
+        -------
+        the equilibrium line altitude (ELA, units: m)
+        """
+
+        if len(np.atleast_1d(year)) > 1:
+            return np.asarray([self.get_ela(year=yr, **kwargs) for yr in year])
+
+        if self.valid_bounds is None:
+            raise ValueError('attribute `valid_bounds` needs to be '
+                             'set for the ELA computation.')
+
+        # Check for invalid ELAs
+        #b0, b1 = self.valid_bounds
+        #if (np.any(~np.isfinite(
+        #        self.get_annual_mb([b0, b1], year=year, **kwargs))) or
+        #        (self.get_annual_mb([b0], year=year, **kwargs)[0] > 0) or
+        #        (self.get_annual_mb([b1], year=year, **kwargs)[0] < 0)):
+        #    return np.NaN
+
+        def to_minimize(x):
+            return (self.get_annual_mb([x], year=year, **kwargs)[0] *
+                    SEC_IN_YEAR * self.rho)
+
+        return optimization.brentq(to_minimize, *self.valid_bounds, xtol=0.1)
 
 
 # copy of MultipleFlowlineMassBalance that works with TIModel
