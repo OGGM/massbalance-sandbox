@@ -27,6 +27,11 @@ from MBsandbox.mbmod_daily_oneflowline import TIModel, TIModel_Sfc_Type
 from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel, run_constant_climate_TIModel,
                                         run_random_climate_TIModel)
 
+# depends on oggm version ...
+try:
+    from oggm.core.massbalance import apparent_mb_from_any_mb
+except:
+    from oggm.core.climate import apparent_mb_from_any_mb
 
 # necessary for `melt_f_calib_geod_prep_inversion`
 _doc = 'the calibrated melt_f according to the geodetic data with the ' \
@@ -803,7 +808,8 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
                                                             pf_cte_dict=False,
                                                             optimize_std_quot=True,
                                                             pf_cte_via= '',
-                                                            t_melt=0
+                                                            t_melt=0,
+                                                            path_w_prcp='/home/lilianschuster/Schreibtisch/PhD/Schuster_et_al_phd_paper_1/data/'
                                                             ):
     ''' todo: do documentation '''
     j = 0
@@ -878,7 +884,13 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
                                      'specific_melt_winter_kg_m2', 'except_necessary', 'quot_std', 'mae_mb_profile',
                                      'bias_winter_mb',
                                      'mb_type', 'grad_type', 'melt_f_change', 'melt_f_update','tau_e_fold_yr'])
-    for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_real_daily']:
+    for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_pseudo_daily_fake', 'mb_real_daily']:
+        if mb_type == 'mb_pseudo_daily_fake':
+            temp_std_const_from_hist = True
+            mb_type_r = 'mb_pseudo_daily'
+        else:
+            temp_std_const_from_hist = False
+            mb_type_r = mb_type
         for grad_type in ['cte', 'var_an_cycle']:
             for melt_f_change_r in ['linear', 'neg_exp_t0.5yr', 'neg_exp_t1.0yr']:
                 if 'neg_exp' in melt_f_change_r:
@@ -893,32 +905,34 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
                 if sfc_type_distinction:
                     gd_mb = TIModel_Sfc_Type(gdir, 200,
                                              prcp_fac=1,
-                                             mb_type=mb_type,
+                                             mb_type=mb_type_r,
                                              grad_type=grad_type,
                                              baseline_climate=climate_type,
                                              melt_f_ratio_snow_to_ice=0.5, melt_f_update=melt_f_update,
                                              melt_f_change=melt_f_change,
                                              tau_e_fold_yr=tau_e_fold_yr,
-                                             t_melt=t_melt
+                                             t_melt=t_melt,
+                                             temp_std_const_from_hist=temp_std_const_from_hist
                                              )
                 else:
                     gd_mb = TIModel(gdir, 200,
                                     prcp_fac=1,
-                                    mb_type=mb_type,
+                                    mb_type=mb_type_r,
                                     grad_type=grad_type,
                                     baseline_climate=climate_type,
-                                    t_melt=t_melt
+                                    t_melt=t_melt,
+                                    temp_std_const_from_hist=temp_std_const_from_hist
                                     )
 
                 if not sfc_type_distinction and melt_f_change == 'neg_exp':
                     pass
                 else:
                     if pf_cte_via == '_pf_via_winter_mb_log_fit':
-                        path_folder = '/home/lilianschuster/Schreibtisch/PhD/Schuster_et_al_phd_paper_1/data/'
                         #pd_pf = pd.read_csv(
                         #    f'{path_folder}winter_prcp_mean_general_log_relation_pf_winter_mb_match.csv',
                         #    index_col='rgi_id')
-                        pd_pf = pd.read_csv(f'{path_folder}winter_daily_prcp_mean_general_log_relation_pf_winter_mb_match.csv', index_col='rgi_id')
+                        pd_pf = pd.read_csv(f'{path_w_prcp}winter_daily_prcp_mean_general_log_relation_pf_winter_mb_match.csv',
+                                            index_col='rgi_id')
                         # old
                         # pf_cte = pd_pf.loc[gdir.rgi_id]['pf_via_log_regression']
                         hemisphere = gdir.hemisphere
@@ -1834,9 +1848,9 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias(gdir,
                             out = calibrate_to_geodetic_bias_winter_mb(gdir, method = method,
                                                                        temp_bias = temp_bias, mb_type=mb_type,
                                                                        grad_type=grad_type,
-                                                         melt_f_update=melt_f_update,
-                                                         melt_f_change=melt_f_change,
-                                                                      sfc_type_distinction=sfc_type_distinction)
+                                                                       melt_f_update=melt_f_update,
+                                                                       melt_f_change=melt_f_change,
+                                                                       sfc_type_distinction=sfc_type_distinction)
                             (pd_calib.loc[j,'pf_opt'], pd_calib.loc[j,'melt_f'],
                              pd_calib.loc[j, 'winter_prcp_mean'], pd_calib.loc[j, 'winter_solid_prcp_mean'],
                              pd_calib.loc[j, 'specific_melt_winter_kg_m2'], pd_calib.loc[j,'except_necessary'],
@@ -1945,8 +1959,13 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir,
                                  'winter_prcp_mean', 'winter_solid_prcp_mean',
                                  'specific_melt_winter_kg_m2', 'except_necessary', 'quot_std', 'mae_mb_profile',
                                      'mb_type', 'grad_type', 'melt_f_change', 'melt_f_update', 'tau_e_fold_yr'])
-    for mb_type in ['mb_monthly', 'mb_pseudo_daily', 'mb_real_daily']:
-        #print(mb_type)
+    for mb_type in ['mb_monthly', 'mb_pseudo_daily',  'mb_pseudo_daily_fake', 'mb_real_daily']:
+        if mb_type == 'mb_pseudo_daily_fake':
+            temp_std_const_from_hist = True
+            mb_type_r = 'mb_pseudo_daily'
+        else:
+            temp_std_const_from_hist = False
+            mb_type_r = mb_type
         for grad_type in ['cte', 'var_an_cycle']:
             for melt_f_change_r in ['linear', 'neg_exp_t0.5yr', 'neg_exp_t1yr']:
                 if 'neg_exp' in melt_f_change_r:
@@ -1961,21 +1980,23 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir,
                 if sfc_type_distinction:
                     gd_mb = TIModel_Sfc_Type(gdir, 200,
                                              prcp_fac=1,
-                                             mb_type=mb_type,
+                                             mb_type=mb_type_r,
                                              grad_type=grad_type,
                                              baseline_climate=climate_type,
                                              melt_f_ratio_snow_to_ice=0.5, melt_f_update=melt_f_update,
                                              melt_f_change=melt_f_change,
                                              tau_e_fold_yr=tau_e_fold_yr,
-                                             t_melt=t_melt
+                                             t_melt=t_melt,
+                                             temp_std_const_from_hist=temp_std_const_from_hist
                                              )
                 else:
                     gd_mb = TIModel(gdir, 200,
                                     prcp_fac=1,
-                                    mb_type=mb_type,
+                                    mb_type=mb_type_r,
                                     grad_type=grad_type,
                                     baseline_climate=climate_type,
-                                    t_melt=t_melt
+                                    t_melt=t_melt,
+                                    temp_std_const_from_hist=temp_std_const_from_hist
                                     )
 
                 if not sfc_type_distinction and melt_f_change == 'neg_exp':
@@ -2238,7 +2259,7 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
         mb_mod.reset_pd_mb_bucket()
     # Fabi?: which starting year? I set it to 2000 !!! Is this right?
     # get the apparent_mb (necessary for inversion)
-    climate.apparent_mb_from_any_mb(gdir, mb_model=mb_mod,
+    apparent_mb_from_any_mb(gdir, mb_model=mb_mod,
                                     mb_years=np.arange(2000, ye, 1))
 
     # TODO: maybe also add type of mb_model_sub_class into fs ???

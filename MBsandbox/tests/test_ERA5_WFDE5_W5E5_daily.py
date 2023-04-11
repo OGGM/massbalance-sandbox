@@ -25,6 +25,46 @@ warnings.filterwarnings("once", category=DeprecationWarning)
 # %%
 
 class Test_climate_daily_datasets:
+
+
+
+    @pytest.mark.no_w5e5
+    def test_glacier_gridpoint_selection(self):
+
+        # test is only done for the `inv` file, as the other files are only
+        # downloaded for the HEF gridpoints as they would be too large otherwise.
+        # However, the same test and other tests are done for all files (also ISIMIP3b)
+        # and all glaciers inside of
+        # https://nbviewer.org/urls/cluster.klima.uni-bremen.de/
+        # ~lschuster/example_ipynb/flatten_glacier_gridpoint_tests.ipynb
+        p_inv = get_w5e5_file('W5E5_daily', 'inv')
+        dinv = xr.open_dataset(p_inv)
+        # select three glaciers where two failed in the
+        # previous gswp3_w5e5 version
+
+        for coord in [(10.7584, 46.8003),  # HEF
+                      (-70.8931 + 360, -72.4474),  # RGI60-19.00124
+                      (51.495, 30.9010),  # RGI60-12.01691
+                      (0, 0)  # random gridpoint not near to a glacier
+                      ]:
+            lon, lat = coord
+            # get the distances to the glacier coordinate
+            c = (dinv.longitude - lon) ** 2 + (dinv.latitude - lat) ** 2
+            # select the nearest climate point from the flattened
+            # glacier gridpoint
+            lat_near, lon_near, dist = c.to_dataframe('distance').sort_values('distance').iloc[0]
+            # for a randomly chosen gridpoint, the next climate gridpoint is far away
+            if coord == (0, 0):
+                with pytest.raises(AssertionError):
+                    assert np.abs(lat_near - lat) < 0.25
+                    assert np.abs(lon_near - lon) < 0.25
+                    assert dist < (0.25 ** 2 + 0.25 ** 2) ** 0.5
+            # for glacier gridpoints the next gridpoint should be the nearest
+            # (GSWP3-W5E5 resolution is 0.5°)
+            else:
+                assert np.abs(lat_near - lat) < 0.25
+                assert np.abs(lon_near - lon) < 0.25
+                assert dist < (0.25 ** 2 + 0.25 ** 2) ** 0.5
     @pytest.mark.no_w5e5
     def test_ERA5_daily_dataset(self):
 
@@ -364,7 +404,8 @@ class Test_process_era5_daily_wfde5_w5e5_hef:
             # cfg.PARAMS[hydro_month_nh = 1], this is in conflict with 8
             process_era5_daily_data(gdir, y0=1979, y1=2018, hydro_month_nh=8)
 
-    @pytest.mark.no_w5e5
+    #@pytest.mark.no_w5e5
+    @pytest.mark.skip(reason="MSWEP removed, as it is not used")
     def test_process_mswep_data(self, gdir):
 
         # first with daily resolution

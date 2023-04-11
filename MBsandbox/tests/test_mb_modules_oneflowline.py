@@ -184,6 +184,10 @@ class Test_geodetic_sfc_type:
                              tau_e_fold_yr=0,  # default
                              baseline_climate=baseline_climate)
 
+        # ok, this does not work because of the sfc type buckets, if I want to get the ELA, need
+        # to think about a way around that ...
+        # mb_mod_monthly_1_m_neg_exp_tau_0_5.get_ela(np.arange(2000,2020))
+
     def test_sfc_type_update(self, gdir, mb_type='mb_monthly'):
         cfg.PARAMS['hydro_month_nh'] = 1
         # just choose any random melt_f
@@ -2456,6 +2460,8 @@ class Test_directobs_hydro10:
                     # using temp_std_const_from_hist=True
                     assert np.abs(utils.md(tot_mbN,
                                            mbdf['ANNUAL_BALANCE'])) < tol
+
+
         # every 12th entry should be the same if using temp_std_const_from_hist=True
         assert np.all(np.concatenate([temp_std_cte[0:12]] * 40) == temp_std_cte)
         # the temp_std_cte should be averages from temp_std_real grouped by month
@@ -2463,6 +2469,24 @@ class Test_directobs_hydro10:
         for m in np.arange(0, 12, 1):
             np.testing.assert_allclose(temp_std_real[(mb_mod.years >= 2000)][m::12].mean(),
                                               temp_std_cte[m], rtol=1e-5)
+        tot_mbN_list = []
+        for temp_std_const_from_hist in [True, False]:
+            mb_mod = TIModel(gdir, mu_star_opt[mb_type],
+                             mb_type='mb_pseudo_daily_fake',
+                             temp_std_const_from_hist=temp_std_const_from_hist,
+                             prcp_fac=pf, N=N,
+                             t_solid=0, t_liq=2, t_melt=0,
+                             default_grad=-0.0065,
+                             grad_type=grad_type,
+                             baseline_climate=climate)
+
+            assert mb_mod.mb_type == 'mb_pseudo_daily'
+
+            tot_mbN_t = mb_mod.get_specific_mb(heights=hgts,
+                                             widths=widths,
+                                             year=mbdf.index.values)
+            tot_mbN_list.append(tot_mbN_t)
+        np.testing.assert_allclose(tot_mbN_list[0], tot_mbN_list[1])
 
     def test_prcp_fac_update(self, gdir):
 

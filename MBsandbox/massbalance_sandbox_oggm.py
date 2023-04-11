@@ -1,869 +1,394 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Dec 24 12:28:37 2020
+"""Mass balance models - next generation"""
 
-@author: lilianschuster
 
-different temperature index mass balance types added that are working with the Huss flowlines
-
-"""
-
-import numpy as np
-from scipy.interpolate import interp1d
-import pandas as pd
-import xarray as xr
-import os
-import netCDF4
-import datetime
-import warnings
-import scipy.stats as stats
+# Built ins
 import logging
-import copy
-from scipy import optimize as optimization
-
-# imports from oggm
+import os
+# External libs
+import cftime
+import numpy as np
+import xarray as xr
+import pandas as pd
+from scipy.interpolate import interp1d
+from scipy import optimize
+# Locals
+import oggm.cfg as cfg
+from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH
+from oggm.utils import (SuperclassMeta, get_geodetic_mb_dataframe,
+                        floatyear_to_date, date_to_floatyear,
+                        monthly_timeseries, ncDataset,
+                        clip_min, clip_max, clip_array, clip_scalar,
+                        weighted_average_1d, lazy_property)
+from oggm.exceptions import (InvalidWorkflowError, InvalidParamsError,
+                             MassBalanceCalibrationError)
 from oggm import entity_task
-from oggm import cfg, utils
-from oggm.cfg import SEC_IN_YEAR, SEC_IN_MONTH, SEC_IN_DAY
-from oggm.utils import (floatyear_to_date, date_to_floatyear, ncDataset,
-                        lazy_property, monthly_timeseries,
-                        clip_min, clip_array)
-from oggm.utils._funcs import haversine
-from oggm.utils._workflow import global_task
-
-from oggm.exceptions import InvalidParamsError, InvalidWorkflowError
-from oggm.shop.ecmwf import get_ecmwf_file, BASENAMES
-from oggm.core.massbalance import MassBalanceModel
-
-import MBsandbox
 
 # Module logger
 log = logging.getLogger(__name__)
-ECMWF_SERVER = 'https://cluster.klima.uni-bremen.de/~oggm/climate/'
 
-# only relevant when using
-# server='https://cluster.klima.uni-bremen.de/~lschuster/'
-# only glacier-relevant gridpoints included!
-BASENAMES['ERA5_daily'] = {
-        'inv': 'era5/daily/v1.0/era5_glacier_invariant_flat.nc',
-        'tmp': 'era5/daily/v1.0/era5_daily_t2m_1979-2018_flat.nc'
-        }
+# Climate relevant global params - not optimised
+MB_GLOBAL_PARAMS = ['temp_default_gradient',
+                    'temp_all_solid',
+                    'temp_all_liq',
+                    'temp_melt']
 
-BASENAMES['WFDE5_CRU_daily'] = {
-    'inv': 'wfde5_cru/daily/v1.1/wfde5_cru_glacier_invariant_flat.nc',
-    'tmp': 'wfde5_cru/daily/v1.1/wfde5_cru_tmp_1979-2018_flat.nc',
-    'prcp': 'wfde5_cru/daily/v1.1/wfde5_cru_prcp_1979-2018_flat.nc',
-    }
-
-BASENAMES['W5E5_daily'] = {
-    'inv': 'w5e5v2.0/flattened/2023.2/daily/w5e5v2.0_glacier_invariant_flat.nc',
-    'tmp': 'w5e5v2.0/flattened/2023.2/daily/w5e5v2.0_tas_global_daily_flat_glaciers_1979_2019.nc',
-    'prcp': 'w5e5v2.0/flattened/2023.2/daily/w5e5v2.0_pr_global_daily_flat_glaciers_1979_2019.nc',
-    }
-
-BASENAMES['MSWEP_daily'] = {
-    'prcp': 'mswepv2.8/flattened/daily/mswep_pr_global_daily_flat_glaciers_1979_2019.nc'
-    # there is no orography file for MSWEP!!! (and also no temperature file)
-    }
-
-# this is for Sarah Hanus workflow
-# this only works if
-# ECMWF_SERVER = 'https://cluster.klima.uni-bremen.de/~oggm/shanus/'
-BASENAMES['W5E5_daily_dw'] = {
-    'inv': 'ISIMIP3a/flattened/daily/gswp3-w5e5_obsclim_glacier_invariant_flat.nc',
-    'tmp': 'ISIMIP3a/flattened/daily/gswp3-w5e5_obsclim_tas_global_daily_flat_glaciers_1979_2019.nc',
-    'prcp': 'ISIMIP3a/flattened/daily/gswp3-w5e5_obsclim_pr_global_daily_flat_glaciers_1979_2019.nc',
-    }
+from oggm.core.massbalance import MassBalanceModel
 
 
-def get_w5e5_file(dataset='W5E5_daily', var=None,
-                  server='https://cluster.klima.uni-bremen.de/~lschuster/'):
-    """returns a path to desired WFDE5_CRU or W5E5 or MSWEP
-     baseline climate file.
-
-    If the file is not present, downloads it
-
-    ... copy of get_ecmwf_file (the only difference is that this function is more variable with a
-     server keyword-argument instead of using only ECMWF_SERVER),
-     if wished could be easily adapted to work in OGGM proper
-
-    dataset : str
-        e.g. 'W5E5_daily', 'WFDE5_CRU_daily', 'MSWEP_daily', 'W5E5_daily_dw', could define more BASENAMES
-    var : str
-        'inv' for invariant
-        'tmp' for temperature
-        'pre' for precipitation
-    server : str
-        path to climate files on the cluster
+class TestTIModel(MassBalanceModel):
+    """Monthly temperature index model.
     """
-    if dataset == 'WFDE5_CRU_daily' or dataset == 'ERA5_daily':
-        print('Attention: these datasets are basically deprecated. There '
-                          'is also an issue with the flattened files, i.e., some'
-                          'glacier gridpoints are missing. If you really want to use'
-                          'them, you need to do the flattening yourself. ')
-    # check if input makes sense
-    if dataset not in BASENAMES.keys():
-        raise InvalidParamsError('ECMWF dataset {} not '
-                                 'in {}'.format(dataset, BASENAMES.keys()))
-    if var not in BASENAMES[dataset].keys():
-        raise InvalidParamsError('ECMWF variable {} not '
-                                 'in {}'.format(var,
-                                                BASENAMES[dataset].keys()))
+    def __init__(self, gdir,
+                 filename='climate_historical',
+                 input_filesuffix='',
+                 fl_id=None,
+                 melt_f=None,
+                 temp_bias=None,
+                 prcp_fac=None,
+                 bias=0,
+                 ys=None,
+                 ye=None,
+                 repeat=False,
+                 check_calib_params=True,
+                 ):
+        """Initialize.
 
-    # File to look for
-    return utils.file_downloader(server + BASENAMES[dataset][var])
+        Parameters
+        ----------
+        gdir : GlacierDirectory
+            the glacier directory
+        filename : str, optional
+            set to a different BASENAME if you want to use alternative climate
+            data. Default is 'climate_historical'
+        input_filesuffix : str, optional
+            append a suffix to the filename (useful for GCM runs).
+        fl_id : int, optional
+            if this flowline has been calibrated alone and has specific
+            model parameters.
+        melt_f : float, optional
+            set to the value of the melt factor you want to use,
+            here the unit is kg m-2 day-1 K-1
+            (the default is to use the calibrated value).
+        temp_bias : float, optional
+            set to the value of the temperature bias you want to use
+            (the default is to use the calibrated value).
+        prcp_fac : float, optional
+            set to the value of the precipitation factor you want to use
+            (the default is to use the calibrated value).
+        bias : float, optional
+            set to the alternative value of the calibration bias [mm we yr-1]
+            you want to use (the default is to use the calibrated value)
+            Note that this bias is *substracted* from the computed MB. Indeed:
+            BIAS = MODEL_MB - REFERENCE_MB.
+        ys : int
+            The start of the climate period where the MB model is valid
+            (default: the period with available data)
+        ye : int
+            The end of the climate period where the MB model is valid
+            (default: the period with available data)
+        repeat : bool
+            Whether the climate period given by [ys, ye] should be repeated
+            indefinitely in a circular way
+        check_calib_params : bool
+            OGGM will try hard not to use wrongly calibrated parameters
+            by checking the global parameters used during calibration and
+            the ones you are using at run time. If they don't match, it will
+            raise an error. Set to "False" to suppress this check.
+        """
 
+        super(TestTIModel, self).__init__()
+        self.valid_bounds = [-1e4, 2e4]  # in m
+        self.fl_id = fl_id  # which flowline are we the model of?
+        self.gdir = gdir
 
-def write_climate_file(gdir, time, prcp, temp,
-                       ref_pix_hgt, ref_pix_lon, ref_pix_lat,
-                       ref_pix_lon_pr=None, ref_pix_lat_pr=None,
-                       gradient=None, temp_std=None,
-                       time_unit=None, calendar=None,
-                       source=None, long_source=None,
-                       file_name='climate_historical',
-                       filesuffix='',
-                       temporal_resol='monthly'):
-    """Creates a netCDF4 file with climate data timeseries.
-    this could be used in general also in OGGM proper
+        if melt_f is None:
+            melt_f = self.calib_params['melt_f']
 
-    Parameters
-    ----------
-    gdir:
-        glacier directory
-    time : ndarray
-        the time array, in a format understood by netCDF4
-    prcp : ndarray
-        the precipitation array (unit: 'kg m-2')
-    temp : ndarray
-        the temperature array (unit: 'degC')
-    ref_pix_hgt : float
-        the elevation of the dataset's reference altitude
-        (for correction). In practice it is the same altitude as the
-        baseline climate (if MSWEP prcp used, only of temp. climate file).
-    ref_pix_lon : float
-        the location of the gridded data's grid point
-        (if MSWEP prcp used, only of temp. climate file)
-    ref_pix_lat : float
-        the location of the gridded data's grid point
-        (if MSWEP prcp used, only of temp. climate file)
-    ref_pix_lon_pr : float
-        default is None, only if MSWEP prcp used, it is the
-        location of the gridded prcp data grid point
-    ref_pix_lat_pr : float
-        default is None, only if MSWEP prcp used, it is the
-        location of the gridded prcp data grid point
-    gradient : ndarray, optional
-        whether to use a time varying gradient
-    temp_std : ndarray, optional
-        the daily standard deviation of temperature (useful for PyGEM)
-    time_unit : str
-        the reference time unit for your time array. This should be chosen
-        depending on the length of your data. The default is to choose
-        it ourselves based on the starting year.
-    calendar : str
-        If you use an exotic calendar (e.g. 'noleap')
-    source : str
-        the climate data source (required)
-    long_source : str
-        the climate data source describing origin of
-        temp, prpc and lapse rate in detail
-    file_name : str
-        How to name the file
-    filesuffix : str
-        Apply a suffix to the file
-    temporal_resol : str
-        temporal resolution of climate file, either monthly (default) or
-        daily
-    """
+        if temp_bias is None:
+            temp_bias = self.calib_params['temp_bias']
 
-    if source == 'ERA5_daily' and filesuffix == '':
-        raise InvalidParamsError("filesuffix should be '_daily' for ERA5_daily"
-                                 "file_name climate_historical is normally"
-                                 "monthly data")
-    elif (source == 'WFDE5_CRU_daily' and filesuffix == ''
-          and temporal_resol == 'daily'):
-        raise InvalidParamsError("filesuffix should be '_daily' for WFDE5_CRU_daily"
-                                 "if daily chosen as temporal_resol"
-                                 "file_name climate_historical is normally"
-                                 "monthly data")
-    elif (source == 'W5E5_daily' and filesuffix == ''
-          and temporal_resol == 'daily'):
-        raise InvalidParamsError("filesuffix should be '_daily' for W5E5_daily"
-                                 "if daily chosen as temporal_resol"
-                                 "file_name climate_historical is normally"
-                                 "monthly data")
-    if long_source is None:
-        long_source = source
-    if 'MSWEP' in long_source:
-        prcp_from_mswep = True
-    else:
-        prcp_from_mswep = False
-    # overwrite is default
-    fpath = gdir.get_filepath(file_name, filesuffix=filesuffix)
-    if os.path.exists(fpath):
-        os.remove(fpath)
+        if prcp_fac is None:
+            prcp_fac = self.calib_params['prcp_fac']
 
-    if source is None:
-        raise InvalidParamsError('`source` kwarg is required')
+        # Check the climate related params to the GlacierDir to make sure
+        if check_calib_params:
+            mb_calib = self.calib_params['mb_global_params']
+            for k, v in mb_calib.items():
+                if v != cfg.PARAMS[k]:
+                    msg = ('You seem to use different mass balance parameters '
+                           'than used for the calibration: '
+                           f"you use cfg.PARAMS['{k}']={cfg.PARAMS[k]} while "
+                           f"it was calibrated with cfg.PARAMS['{k}']={v}. "
+                           'Set `check_calib_params=False` to ignore this '
+                           'warning.')
+                    raise InvalidWorkflowError(msg)
+            src = self.calib_params['baseline_climate_source']
+            src_calib = gdir.get_climate_info()['baseline_climate_source']
+            if src != src_calib:
+                msg = (f'You seem to have calibrated with the {src} '
+                       f"climate data while this gdir was calibrated with "
+                       f"{src_calib}. Set `check_calib_params=False` to "
+                       f"ignore this warning.")
+                raise InvalidWorkflowError(msg)
 
-    zlib = cfg.PARAMS['compress_climate_netcdf']
+        self.melt_f = melt_f
+        self.bias = bias
 
-    try:
-        y0 = time[0].year
-        y1 = time[-1].year
-    except AttributeError:
-        time = pd.DatetimeIndex(time)
-        y0 = time[0].year
-        y1 = time[-1].year
+        # Global parameters
+        self.t_solid = cfg.PARAMS['temp_all_solid']
+        self.t_liq = cfg.PARAMS['temp_all_liq']
+        self.t_melt = cfg.PARAMS['temp_melt']
 
-    if time_unit is None:
-        # http://pandas.pydata.org/pandas-docs/stable/timeseries.html
-        # #timestamp-limitations
-        if y0 > 1800:
-            time_unit = 'days since 1801-01-01 00:00:00'
-        elif y0 >= 0:
-            time_unit = ('days since {:04d}-01-01 '
-                         '00:00:00'.format(time[0].year))
-        else:
-            raise InvalidParamsError('Time format not supported')
+        # check if valid prcp_fac is used
+        if prcp_fac <= 0:
+            raise InvalidParamsError('prcp_fac has to be above zero!')
+        default_grad = cfg.PARAMS['temp_default_gradient']
 
-    with ncDataset(fpath, 'w', format='NETCDF4') as nc:
-        # these are only valid for temperature if MSWEP prcp is used!!!
-        nc.ref_hgt = ref_pix_hgt
-        nc.ref_pix_lon = ref_pix_lon
-        nc.ref_pix_lat = ref_pix_lat
-        nc.ref_pix_dis = haversine(gdir.cenlon, gdir.cenlat,
-                                   ref_pix_lon, ref_pix_lat)
-        if prcp_from_mswep:
-            # there is no reference height given!!!
-            if ref_pix_lon_pr is None or ref_pix_lat_pr is None:
-                raise InvalidParamsError('if MSWEP is used for prcp, need to add'
-                                         'precipitation lon/lat gridpoints')
-            nc.ref_pix_lon_pr = np.round(ref_pix_lon_pr,3)
-            nc.ref_pix_lat_pr = np.round(ref_pix_lat_pr,3)
+        # Public attrs
+        self.hemisphere = gdir.hemisphere
+        self.repeat = repeat
 
-        nc.climate_source = long_source
-        if time[0].month == 1:
-            nc.hydro_yr_0 = y0
-        else:
-            nc.hydro_yr_0 = y0 + 1
-        nc.hydro_yr_1 = y1
+        # Private attrs
+        # to allow prcp_fac to be changed after instantiation
+        # prescribe the prcp_fac as it is instantiated
+        self._prcp_fac = prcp_fac
+        # same for temp bias
+        self._temp_bias = temp_bias
 
-        nc.createDimension('time', None)
+        # Read climate file
+        fpath = gdir.get_filepath(filename, filesuffix=input_filesuffix)
+        with ncDataset(fpath, mode='r') as nc:
+            # time
+            time = nc.variables['time']
+            time = cftime.num2date(time[:], time.units, calendar=time.calendar)
+            ny, r = divmod(len(time), 12)
+            if r != 0:
+                raise ValueError('Climate data should be N full years')
 
-        nc.author = 'OGGM'
-        nc.author_info = 'Open Global Glacier Model'
+            # We check for calendar years
+            if (time[0].month != 1) or (time[-1].month != 12):
+                raise InvalidWorkflowError('We now work exclusively with '
+                                           'calendar years.')
 
-        timev = nc.createVariable('time', 'i4', ('time',))
+            # Quick trick because we now the size of our array
+            years = np.repeat(np.arange(time[-1].year - ny + 1,
+                                        time[-1].year + 1), 12)
+            pok = slice(None)  # take all is default (optim)
+            if ys is not None:
+                pok = years >= ys
+            if ye is not None:
+                try:
+                    pok = pok & (years <= ye)
+                except TypeError:
+                    pok = years <= ye
 
-        tatts = {'units': time_unit}
-        if calendar is None:
-            calendar = 'standard'
+            self.years = years[pok]
+            self.months = np.tile(np.arange(1, 13), ny)[pok]
 
-        tatts['calendar'] = calendar
-        try:
-            numdate = netCDF4.date2num([t for t in time], time_unit,
-                                       calendar=calendar)
-        except TypeError:
-            # numpy's broken datetime only works for us precision
-            time = time.astype('M8[us]').astype(datetime.datetime)
-            numdate = netCDF4.date2num(time, time_unit, calendar=calendar)
-
-        timev.setncatts(tatts)
-        timev[:] = numdate
-
-        v = nc.createVariable('prcp', 'f4', ('time',), zlib=zlib)
-        v.units = 'kg m-2'
-        # this could be made more beautiful
-        # just rough estimate
-        if (len(prcp) > (nc.hydro_yr_1 - nc.hydro_yr_0 + 1) * 28 * 12 and
-            temporal_resol == 'daily'):
-            if source == 'ERA5_daily':
-                v.long_name = ("total daily precipitation amount, "
-                               "assumed same for each day of month")
-            elif source == 'WFDE5_daily_cru':
-                v.long_name = ("total daily precipitation amount"
-                               "sum of snowfall and rainfall")
-            elif source == 'W5E5_daily' and not prcp_from_mswep:
-                v.long_name = ("total daily precipitation amount")
-            elif source == 'W5E5_daily' and prcp_from_mswep:
-                v.long_name = ("total daily precipitation amount, "
-                               "1979-01-01 prcp assumed to be equal to 1979-01-02"
-                               "due to missing data, MSWEP prcp with 0.1deg resolution"
-                               "(finer than temp. data), so refpixhgt, "
-                               "refpixlon and refpixlat not valid for prcp data!!!")
-
-        elif (len(prcp) == (nc.hydro_yr_1 - nc.hydro_yr_0 + 1) * 12
-              and temporal_resol == 'monthly' and not prcp_from_mswep):
-            v.long_name = 'total monthly precipitation amount'
-        elif (len(prcp) == (nc.hydro_yr_1 - nc.hydro_yr_0 + 1) * 12
-              and temporal_resol == 'monthly' and prcp_from_mswep):
-            v.long_name = ("total monthly precipitation amount, MSWEP prcp with 0.1deg resolution"
-                          "(finer than temp. data), so refpixhgt, " 
-                          "refpixlon and refpixlat not valid for prcp data!!!")
-        else:
-            raise InvalidParamsError('there is a conflict in the'
-                                     'prcp timeseries, '
-                                     'please check temporal_resol')
-        # just to check that it is in kg m-2 per day or per month and not in per second
-        assert prcp.max() > 1
-        v[:] = prcp
-        # check that there are no filling values inside
-        assert np.all(v[:].data < 1e5)
-
-        v = nc.createVariable('temp', 'f4', ('time',), zlib=zlib)
-        v.units = 'degC'
-        if ((source == 'ERA5_daily' or source == 'WFDE5_daily_cru' or source =='W5E5_daily') and
-            len(temp) > (y1 - y0) * 28 * 12 and temporal_resol == 'daily'):
-            v.long_name = '2m daily temperature at height ref_hgt'
-        elif source == 'ERA5_daily' and len(temp) <= (y1 - y0) * 30 * 12:
-            raise InvalidParamsError('if the climate dataset (here source)'
-                                     'is ERA5_daily, temperatures should be in'
-                                     'daily resolution, please check or set'
-                                     'set source to another climate dataset')
-        elif (source == 'WFDE5_daily_cru' and temporal_resol == 'monthly' and
-              len(temp) > (y1 - y0) * 28 * 12):
-            raise InvalidParamsError('something wrong in the implementation')
-        else:
-            v.long_name = '2m monthly temperature at height ref_hgt'
-
-        v[:] = temp
-        # no filling values!
-        assert np.all(v[:].data < 1e5)
-
-        if gradient is not None:
-            v = nc.createVariable('gradient', 'f4', ('time',), zlib=zlib)
-            v.units = 'degC m-1'
-            v.long_name = ('temperature gradient from local regression or'
-                           'lapserates')
-            v[:] = gradient
-            # no filling values
-            assert np.all(v[:].data < 1e5)
-
-        if temp_std is not None:
-            v = nc.createVariable('temp_std', 'f4', ('time',), zlib=zlib)
-            v.units = 'degC'
-            v.long_name = 'standard deviation of daily temperatures'
-            v[:] = temp_std
-            # no filling values
-            assert np.all(v[:].data < 1e5)
-
-@entity_task(log, writes=['climate_historical_daily'])
-def process_w5e5_data(gdir, y0=None, y1=None, temporal_resol='daily',
-                      climate_type=None,
-                      output_filesuffix=None,
-                      cluster=False):
-    """
-    Processes and writes the WFDE5_CRU & W5E5 daily baseline climate data for a glacier.
-    Either on daily or on monthly basis. Can also use W5E5_MSWEP, where precipitation is taken
-    from MSWEP (with higher resolution, 0.1°) and temperature comes from W5E5 (so actually from ERA5).
-    In this case, the mean gridpoint altitude is only valid for the temperature gridpoint
-    (there is no orography for MSWEP, and it is different because of a finer resolution in MSWEP)
-
-    Extracts the nearest timeseries and writes everything to a NetCDF file.
-    This uses only the WFDE5_CRU / W5E5 daily temperatures. The temperature lapse
-    rate are used from ERA5dr.
-
-    comment: This is similar to process_era5_daily, maybe a general function would be better
-    TODO: see _verified_download_helper no known hash for ...
-    ----------
-    y0 : int
-        the starting year of the timeseries to write. The default is to take
-        the entire time period available in the file, but with this kwarg
-        you can shorten it (to save space or to crop bad data)
-    y1 : int
-        the starting year of the timeseries to write. The default is to take
-        the entire time period available in the file, but with this kwarg
-        you can shorten it (to save space or to crop bad data)
-    temporal_resol : str
-        uses either daily (default) or monthly data
-    climate_type: str
-        either WFDE5_CRU (default, v1.1 only till end of 2018) or W5E5 (end of 2019)
-        or W5E5_MSWEP (precipitation from MSWEP, temp. from W5E5)
-    output_filesuffix : optional
-         None by default, as the output_filesuffix is automatically chosen
-         from the temporal_resol and climate_type. But you can change the filesuffix here,
-         just make sure that you use then later the right climate file
-    cluster : bool
-        default is False, if this is run on the cluster, set it to True,
-        because we do not need to download the files
-        todo: this logic does not make anymore sense as there are other ways to prevent the cluster from downloading
-        stuff -> probably I can remove cluster = True entirely ?!
-
-    """
-    if cfg.PARAMS['hydro_month_nh'] != 1 and climate_type != 'WFDE5_CRU':
-        raise InvalidParamsError('Hydro months different than 1 are not tested, there is some'
-                                 'issue with the lapse rates, as they only go until 2019-05'
-                                 'if you want other hydro months, need to adapt the code!!!')
-
-    if climate_type == 'WFDE5_CRU':
-        if temporal_resol == 'monthly':
-            output_filesuffix_def = '_monthly_WFDE5_CRU'
-        elif temporal_resol == 'daily':
-            output_filesuffix_def = '_daily_WFDE5_CRU'
-        # basename of climate
-        # (we use for both the daily dataset and resample to monthly)
-        dataset = 'WFDE5_CRU_daily'
-        dataset_prcp = dataset
-    elif climate_type == 'W5E5':
-        if temporal_resol == 'monthly':
-            output_filesuffix_def = '_monthly_W5E5'
-        elif temporal_resol == 'daily':
-            output_filesuffix_def = '_daily_W5E5'
-        # basename of climate
-        # (for both the daily dataset and resample to monthly)
-        dataset = 'W5E5_daily'
-        dataset_prcp = dataset
-    elif climate_type == 'W5E5_dw':
-        output_filesuffix_def = '_daily_W5E5_dw'
-        dataset = 'W5E5_daily_dw'
-        dataset_prcp = dataset
-    elif climate_type =='W5E5_MSWEP':
-        if temporal_resol == 'monthly':
-            output_filesuffix_def = '_monthly_W5E5_MSWEP'
-        elif temporal_resol == 'daily':
-            output_filesuffix_def = '_daily_W5E5_MSWEP'
-        # basename of climate
-        # (for both the daily dataset and resample to monthly)
-        dataset = 'W5E5_daily'
-        # precipitation from MSWEP!!!
-        dataset_prcp = 'MSWEP_daily'
-    else:
-        raise NotImplementedError('climate_type can either be WFDE5_CRU or W5E5 and '
-                                  'temporal_resol either monthly or daily!')
-
-    if output_filesuffix is None:
-        # set the default output_filesuffix
-        output_filesuffix = output_filesuffix_def
-    else:
-        # use the user-given output-filesufix
-        pass
-
-    # wfde5_daily for temperature and precipitation
-    # but need temperature lapse rates from ERA5
-    dataset_othervars = 'ERA5dr'
-
-    # get the central longitude/latitudes of the glacier
-    lon = gdir.cenlon + 360 if gdir.cenlon < 0 else gdir.cenlon
-    lat = gdir.cenlat
-
-    # todo: this logic should be removed
-    if cluster:
-        cluster_path = '/home/www/lschuster/'
-        path_tmp = cluster_path + BASENAMES[dataset]['tmp']
-        path_prcp = cluster_path + BASENAMES[dataset_prcp]['prcp']
-        path_inv = cluster_path + BASENAMES[dataset]['inv']
-
-    else:
-        if climate_type != 'W5E5_dw':
-            path_tmp = get_w5e5_file(dataset, 'tmp')
-            path_prcp = get_w5e5_file(dataset_prcp, 'prcp')
-            path_inv = get_w5e5_file(dataset, 'inv')
-        elif climate_type == 'W5E5_dw':
-            path_tmp = get_w5e5_file(dataset, 'tmp', server='https://cluster.klima.uni-bremen.de/~shanus/')
-            path_prcp = get_w5e5_file(dataset_prcp, 'prcp', server='https://cluster.klima.uni-bremen.de/~shanus/')
-            path_inv = get_w5e5_file(dataset, 'inv', server='https://cluster.klima.uni-bremen.de/~shanus/')
-
-    # Use xarray to read the data
-    # todo: would go faster with only netCDF -.-, but easier with xarray
-    # first temperature dataset
-    with xr.open_dataset(path_tmp) as ds:
-        assert ds.longitude.min() >= 0
-
-        # set temporal subset for the ts data (hydro years)
-        if gdir.hemisphere == 'nh':
-            sm = cfg.PARAMS['hydro_month_nh']
-        elif gdir.hemisphere == 'sh':
-            sm = cfg.PARAMS['hydro_month_sh']
-
-        em = sm - 1 if (sm > 1) else 12
-
-        yrs = ds['time.year'].data
-        y0 = yrs[0] if y0 is None else y0
-        y1 = yrs[-1] if y1 is None else y1
-        if climate_type == 'WFDE5_CRU':
-            # old version of WFDE5_CRU that only goes till 2018
-            if y1 > 2018 or y0 < 1979:
-                text = 'The climate files only go from 1979--2018,\
-                    choose another y0 and y1'
-                raise InvalidParamsError(text)
-        elif climate_type[:4] == 'W5E5':
-            if y1 > 2019 or y0 < 1979:
-                text = 'The climate files only go from 1979 --2019, something is wrong'
-                raise InvalidParamsError(text)
-        # if default settings: this is the last day in March or September
-        time_f = '{}-{:02d}'.format(y1, em)
-        end_day = int(ds.sel(time=time_f).time.dt.daysinmonth[-1].values)
-
-        #  this was tested also for hydro_month = 1
-        ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
-                               '{}-{:02d}-{}'.format(y1, em, end_day)))
-        if sm == 1 and y1 == 2019 and (climate_type[:4] == 'W5E5'):
-            days_in_month = ds['time.daysinmonth'].copy()
-        try:
-            # computing all the distances and choose the nearest gridpoint
-            c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2
-            ds = ds.isel(points=c.argmin())
-        # I turned this around
-        except ValueError:
-            ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
-            # normally if I do the flattening, this here should not occur
-
-        # if we want to use monthly mean temperatures and
-        # standard deviation of daily temperature:
-        Tvar = 'Tair'
-        Pvar = 'tp'
-        if climate_type[:4] == 'W5E5':
-            Tvar = 'tas'
-            Pvar = 'pr'
-        if temporal_resol == 'monthly':
-            Tair_std = ds.resample(time='MS').std()[Tvar]
-            temp_std = Tair_std.data
-            ds = ds.resample(time='MS').mean()
-            ds['longitude'] = ds.longitude.isel(time=0)
-            ds['latitude'] = ds.latitude.isel(time=0)
-        elif temporal_resol == 'daily':
-            temp_std = None
-        else:
-            raise InvalidParamsError('temporal_resol can only be monthly'
-                                     'or daily!')
-
-        # temperature should be in degree Celsius for the glacier climate files
-        temp = ds[Tvar].data - 273.15
-        time = ds.time.data
-
-        ref_lon = float(ds['longitude'])
-        ref_lat = float(ds['latitude'])
-
-        ref_lon = ref_lon - 360 if ref_lon > 180 else ref_lon
-
-    # precipitation: similar as temperature
-    with xr.open_dataset(path_prcp) as ds:
-        assert ds.longitude.min() >= 0
-
-        yrs = ds['time.year'].data
-        y0 = yrs[0] if y0 is None else y0
-        y1 = yrs[-1] if y1 is None else y1
-        # Attention here we take the same y0 and y1 as given from the
-        # daily tmp dataset (goes till end of 2018, or end of 2019)
-
-        # attention if daily data, need endday!!!
-        if climate_type == 'W5E5_MSWEP' and y0 == 1979 and sm == 1:
-            # first day of 1979 is missing!!! (will assume later that it is equal to the
-            # median of January daily prcp ...)
-            ds = ds.sel(time=slice('{}-{:02d}-02'.format(y0, sm),
-                                   '{}-{:02d}-{}'.format(y1, em, end_day)))
-        else:
-            ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
-                                   '{}-{:02d}-{}'.format(y1, em, end_day)))
-        try:
-            # ... prcp is also flattened
-            # in case of W5E5_MSWEP this will be another gridpoint than for temperature
-            # but normally it should work
-            c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2
-            ds = ds.isel(points=c.argmin())
-        except ValueError:
-            # this should not occur
-            ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
-
-        if y0 == 1979 and sm == 1 and climate_type == 'W5E5_MSWEP':
-            median_jan_1979 = np.median(ds.sel(time='1979-01').pr.values) * SEC_IN_DAY
-        # if we want to use monthly summed up precipitation:
-        if temporal_resol == 'monthly':
-            ds = ds.resample(time='MS').sum()
-            ds['longitude'] = ds.longitude.isel(time=0)
-            ds['latitude'] = ds.latitude.isel(time=0)
-        elif temporal_resol == 'daily':
-            pass
-        if climate_type == 'WFDE5_CRU':
-        # the prcp data of wfde5_CRU has been converted already into
-        # kg m-2 day-1 ~ mm/day or into kg m-2 month-1 ~ mm/month
-            prcp = ds[Pvar].data  # * 1000
-        elif climate_type[:4] == 'W5E5':
-            # if daily: convert kg m-2 s-1 into kg m-2 day-1
-            # if monthly: convert monthly sum of kg m-2 s-1 into kg m-2 month-1
-            prcp = ds[Pvar].data * SEC_IN_DAY
-            if climate_type == 'W5E5_MSWEP':
-                # 1st day of January 1979 is missing for MSWEP prcp
-                # assume that precipitation is equal to
-                # median of January daily prcp
-                if y0 == 1979 and sm == 1:
-                    if temporal_resol == 'daily':
-                        prcp = np.append(np.array(median_jan_1979), prcp)
-                    elif temporal_resol == 'monthly':
-                        # in the monthly sum, 1st of January 1979 is missing
-                        # add this value by assuming mean over the other days
-                        prcp[0] = prcp[0] + median_jan_1979
-                    if y1 == 2019:
-                        if temporal_resol == 'daily':
-                            assert len(prcp) == 14975  # 41 years * amount of days
-                        elif temporal_resol == 'monthly':
-                            assert len(prcp) == 492  # 41 years * amount of months
-        ref_lon_pr = float(ds['longitude'])
-        ref_lat_pr = float(ds['latitude'])
-
-        ref_lon_pr = ref_lon_pr - 360 if ref_lon_pr > 180 else ref_lon_pr
-
-    # wfde5/w5e5 invariant file
-    # (gridpoint altitude only valid for temperature
-    # in case of 'W5E5_MSWEP')
-    with xr.open_dataset(path_inv) as ds:
-        assert ds.longitude.min() >= 0
-        ds = ds.isel(time=0)
-        try:
-            # Flattened wfde5_inv (only possibility at the moment)
-            c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2
-            ds = ds.isel(points=c.argmin())
-        except ValueError:
-            # this should not occur
-            ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
-
-        # wfde5 inv ASurf/hgt is already in hgt coordinates
-        # G = cfg.G  # 9.80665
-        hgt = ds['ASurf'].data  # / G
-
-    # here we need to use the ERA5dr data ...
-    # there are no lapse rates from wfde5/W5E5 !!!
-    # TODO: use updated ERA5dr files that go until end of 2019 and update the code accordingly !!!
-    path_lapserates = get_ecmwf_file(dataset_othervars, 'lapserates')
-    with xr.open_dataset(path_lapserates) as ds:
-        assert ds.longitude.min() >= 0
-
-        yrs = ds['time.year'].data
-        y0 = yrs[0] if y0 is None else y0
-        y1 = yrs[-1] if y1 is None else y1
-        # Attention here we take the same y0 and y1 as given from the
-        # daily tmp dataset (goes till end of 2018/2019)
-
-        ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
-                               '{}-{:02d}-01'.format(y1, em)))
-
-        # no flattening done for the ERA5dr gradient dataset
-        ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
-        if sm == 1 and y1 == 2019 and (climate_type[:4] == 'W5E5'):
-            # missing some months of ERA5dr (which only goes till middle of 2019)
-            # otherwise it will fill it with large numbers ...
-            ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm), '2018-{:02d}-01'.format(em)))
-            mean_grad = ds.groupby('time.month').mean().lapserate
-            # fill the last year with mean gradients
-            gradient = np.concatenate((ds['lapserate'].data, mean_grad.values), axis=None)
-        else:
-            # get the monthly gradient values
-            gradient = ds['lapserate'].data
-        if temporal_resol == 'monthly':
-            pass
-        elif temporal_resol == 'daily':
-            # gradient needs to be restructured to have values for each day
-            # when daily resolution  is applied
-            # assume same gradient for each day
-            if sm == 1 and y1 == 2019 and (climate_type[:4] == 'W5E5'):
-                gradient = np.repeat(gradient, days_in_month.resample(time='MS').mean())
-                assert len(gradient) == len(days_in_month)
+            # Read timeseries and correct it
+            self.temp = nc.variables['temp'][pok].astype(np.float64) + self._temp_bias
+            self.prcp = nc.variables['prcp'][pok].astype(np.float64) * self._prcp_fac
+            if 'gradient' in nc.variables and cfg.PARAMS['temp_use_local_gradient']:
+                grad = nc.variables['gradient'][pok].astype(np.float64)
+                # Security for stuff that can happen with local gradients
+                g_minmax = cfg.PARAMS['temp_local_gradient_bounds']
+                grad = np.where(~np.isfinite(grad), default_grad, grad)
+                grad = clip_array(grad, g_minmax[0], g_minmax[1])
             else:
-                gradient = np.repeat(gradient, ds['time.daysinmonth'])
+                grad = self.prcp * 0 + default_grad
+            self.grad = grad
+            self.ref_hgt = nc.ref_hgt
+            self.climate_source = nc.climate_source
+            self.ys = self.years[0]
+            self.ye = self.years[-1]
 
-        long_source = 'temp: {}, prcp: {}, lapse rate: {}'.format(dataset,
-                                                                  dataset_prcp,
-                                                                  dataset_othervars)
-        if climate_type == 'W5E5_MSWEP':
-            ref_pix_lon_pr = ref_lon_pr
-            ref_pix_lat_pr = ref_lat_pr
+    def __repr__(self):
+        """String Representation of the mass balance model"""
+        summary = ['<oggm.MassBalanceModel>']
+        summary += ['  Class: ' + self.__class__.__name__]
+        summary += ['  Attributes:']
+        # Add all scalar attributes
+        done = []
+        for k in ['hemisphere', 'climate_source', 'melt_f', 'prcp_fac', 'temp_bias', 'bias']:
+            done.append(k)
+            v = self.__getattribute__(k)
+            if k == 'climate_source':
+                if v.endswith('.nc'):
+                    v = os.path.basename(v)
+            nofloat = ['hemisphere', 'climate_source']
+            nbform = '    - {}: {}' if k in nofloat else '    - {}: {:.02f}'
+            summary += [nbform.format(k, v)]
+        for k, v in self.__dict__.items():
+            if np.isscalar(v) and not k.startswith('_') and k not in done:
+                nbform = '    - {}: {}'
+                summary += [nbform.format(k, v)]
+        return '\n'.join(summary) + '\n'
+
+    @property
+    def monthly_melt_f(self):
+        return self.melt_f * 365 / 12
+
+    # adds the possibility of changing prcp_fac
+    # after instantiation with properly changing the prcp time series
+    @property
+    def prcp_fac(self):
+        """Precipitation factor (default: cfg.PARAMS['prcp_scaling_factor'])
+
+        Called factor to make clear that it is a multiplicative factor in
+        contrast to the additive temperature bias
+        """
+        return self._prcp_fac
+
+    @prcp_fac.setter
+    def prcp_fac(self, new_prcp_fac):
+        # just to check that no invalid prcp_factors are used
+        if np.any(np.asarray(new_prcp_fac) <= 0):
+            raise InvalidParamsError('prcp_fac has to be above zero!')
+
+        if len(np.atleast_1d(new_prcp_fac)) == 12:
+            # OK so that's monthly stuff
+            new_prcp_fac = np.tile(new_prcp_fac, len(self.prcp) // 12)
+
+        self.prcp *= new_prcp_fac / self._prcp_fac
+        self._prcp_fac = new_prcp_fac
+
+    @property
+    def temp_bias(self):
+        """Add a temperature bias to the time series"""
+        return self._temp_bias
+
+    @temp_bias.setter
+    def temp_bias(self, new_temp_bias):
+
+        if len(np.atleast_1d(new_temp_bias)) == 12:
+            # OK so that's monthly stuff
+            new_temp_bias = np.tile(new_temp_bias, len(self.temp) // 12)
+
+        self.temp += new_temp_bias - self._temp_bias
+        self._temp_bias = new_temp_bias
+
+    @lazy_property
+    def calib_params(self):
+        if self.fl_id is None:
+            return self.gdir.read_json('mb_calib')
         else:
-            # if not MSWEP prcp and temp gridpoints should be the same ones!!!
-            np.testing.assert_allclose(ref_lon_pr, ref_lon)
-            np.testing.assert_allclose(ref_lat_pr, ref_lat)
-            ref_pix_lon_pr = None
-            ref_pix_lat_pr = None
+            try:
+                return self.gdir.read_json('mb_calib',
+                                           filesuffix=f'_fl{self.fl_id}')
+            except FileNotFoundError:
+                return self.gdir.read_json('mb_calib')
 
-    # OK, ready to write
-    write_climate_file(gdir, time, prcp, temp, hgt, ref_lon, ref_lat,
-                       ref_pix_lon_pr=ref_pix_lon_pr, ref_pix_lat_pr=ref_pix_lat_pr,
-                       filesuffix=output_filesuffix,
-                       temporal_resol=temporal_resol,
-                       gradient=gradient,
-                       temp_std=temp_std,
-                       source=dataset,
-                       long_source=long_source,
-                       file_name='climate_historical')
+    def is_year_valid(self, year):
+        return self.ys <= year <= self.ye
+
+    def get_monthly_climate(self, heights, year=None):
+        """Monthly climate information at given heights.
+
+        Note that prcp is corrected with the precipitation factor and that
+        all other model biases (temp and prcp) are applied.
+
+        Returns
+        -------
+        (temp, tempformelt, prcp, prcpsol)
+        """
+
+        y, m = floatyear_to_date(year)
+        if self.repeat:
+            y = self.ys + (y - self.ys) % (self.ye - self.ys + 1)
+        if not self.is_year_valid(y):
+            raise ValueError('year {} out of the valid time bounds: '
+                             '[{}, {}]'.format(y, self.ys, self.ye))
+        pok = np.where((self.years == y) & (self.months == m))[0][0]
+
+        # Read already (temperature bias and precipitation factor corrected!)
+        itemp = self.temp[pok]
+        iprcp = self.prcp[pok]
+        igrad = self.grad[pok]
+
+        # For each height pixel:
+        # Compute temp and tempformelt (temperature above melting threshold)
+        npix = len(heights)
+        temp = np.ones(npix) * itemp + igrad * (heights - self.ref_hgt)
+        tempformelt = temp - self.t_melt
+        clip_min(tempformelt, 0, out=tempformelt)
+
+        # Compute solid precipitation from total precipitation
+        prcp = np.ones(npix) * iprcp
+        fac = 1 - (temp - self.t_solid) / (self.t_liq - self.t_solid)
+        prcpsol = prcp * clip_array(fac, 0, 1)
+
+        return temp, tempformelt, prcp, prcpsol
+
+    def _get_2d_annual_climate(self, heights, year):
+        # Avoid code duplication with a getter routine
+        year = np.floor(year)
+        if self.repeat:
+            year = self.ys + (year - self.ys) % (self.ye - self.ys + 1)
+        if not self.is_year_valid(year):
+            raise ValueError('year {} out of the valid time bounds: '
+                             '[{}, {}]'.format(year, self.ys, self.ye))
+        pok = np.where(self.years == year)[0]
+        if len(pok) < 1:
+            raise ValueError('Year {} not in record'.format(int(year)))
+
+        # Read already (temperature bias and precipitation factor corrected!)
+        itemp = self.temp[pok]
+        iprcp = self.prcp[pok]
+        igrad = self.grad[pok]
+
+        # For each height pixel:
+        # Compute temp and tempformelt (temperature above melting threshold)
+        heights = np.asarray(heights)
+        npix = len(heights)
+        grad_temp = np.atleast_2d(igrad).repeat(npix, 0)
+        grad_temp *= (heights.repeat(12).reshape(grad_temp.shape) -
+                      self.ref_hgt)
+        temp2d = np.atleast_2d(itemp).repeat(npix, 0) + grad_temp
+        temp2dformelt = temp2d - self.t_melt
+        clip_min(temp2dformelt, 0, out=temp2dformelt)
+
+        # Compute solid precipitation from total precipitation
+        prcp = np.atleast_2d(iprcp).repeat(npix, 0)
+        fac = 1 - (temp2d - self.t_solid) / (self.t_liq - self.t_solid)
+        prcpsol = prcp * clip_array(fac, 0, 1)
+
+        return temp2d, temp2dformelt, prcp, prcpsol
+
+    def get_annual_climate(self, heights, year=None):
+        """Annual climate information at given heights.
+
+        Note that prcp is corrected with the precipitation factor and that
+        all other model biases (temp and prcp) are applied.
+
+        Returns
+        -------
+        (temp, tempformelt, prcp, prcpsol)
+        """
+        t, tmelt, prcp, prcpsol = self._get_2d_annual_climate(heights, year)
+        return (t.mean(axis=1), tmelt.sum(axis=1),
+                prcp.sum(axis=1), prcpsol.sum(axis=1))
+
+    def get_monthly_mb(self, heights, year=None, add_climate=False, **kwargs):
+
+        t, tmelt, prcp, prcpsol = self.get_monthly_climate(heights, year=year)
+        mb_month = prcpsol - self.monthly_melt_f * tmelt
+        mb_month -= self.bias * SEC_IN_MONTH / SEC_IN_YEAR
+        if add_climate:
+            return (mb_month / SEC_IN_MONTH / self.rho, t, tmelt,
+                    prcp, prcpsol)
+        return mb_month / SEC_IN_MONTH / self.rho
+
+    def get_annual_mb(self, heights, year=None, add_climate=False, **kwargs):
+
+        t, tmelt, prcp, prcpsol = self._get_2d_annual_climate(heights, year)
+        mb_annual = np.sum(prcpsol - self.monthly_melt_f * tmelt, axis=1)
+        mb_annual = (mb_annual - self.bias) / SEC_IN_YEAR / self.rho
+        if add_climate:
+            return (mb_annual, t.mean(axis=1), tmelt.sum(axis=1),
+                    prcp.sum(axis=1), prcpsol.sum(axis=1))
+        return mb_annual
 
 
-@entity_task(log, writes=['climate_historical_daily'])
-def process_era5_daily_data(gdir, y0=None, y1=None, output_filesuffix='_daily_ERA5',
-                            cluster=False):
-    """Processes and writes the era5 daily baseline climate data for a glacier.
-    into climate_historical_daily.nc
-
-    Extracts the nearest timeseries and writes everything to a NetCDF file.
-    This uses only the ERA5 daily temperatures. The precipitation, lapse
-    rate and standard deviations are used from ERA5dr.
-
-    comment: this is now a new function, which could also be adapted for other climates, but
-    it seemed to be easier to make a new function for a new climate dataset (such as process_w5e5_data)
-    TODO: see _verified_download_helper no known hash for
-     era5_daily_t2m_1979-2018_flat.nc and era5_glacier_invariant_flat
-    ----------
-    y0 : int
-        the starting year of the timeseries to write. The default is to take
-        the entire time period available in the file, but with this kwarg
-        you can shorten it (to save space or to crop bad data)
-    y1 : int
-        the starting year of the timeseries to write. The default is to take
-        the entire time period available in the file, but with this kwarg
-        you can shorten it (to save space or to crop bad data)
-    output_filesuffix : str
-        this add a suffix to the output file (useful to avoid overwriting
-        previous experiments)
-    cluster : bool
-        default is False, if this is run on the cluster, set it to True,
-        because we do not need to download the files
-        todo: this logic does not make anymore sense as there are other
-         ways to prevent the cluster from downloading stuff
-         -> probably I can remove cluster = True entirely ?!
-
-    """
-
-    # era5daily only for temperature
-    dataset = 'ERA5_daily'
-    # for the other variables use the data of ERA5dr
-    dataset_othervars = 'ERA5dr'
-
-    # get the central longitude/latidudes of the glacier
-    lon = gdir.cenlon + 360 if gdir.cenlon < 0 else gdir.cenlon
-    lat = gdir.cenlat
-
-    cluster_path = '/home/www/oggm/climate/'
-
-    if cluster:
-        path = cluster_path + BASENAMES[dataset]['tmp']
-    else:
-        path = get_ecmwf_file(dataset, 'tmp')
-
-    # Use xarray to read the data
-    # would go faster with netCDF -.-
-    with xr.open_dataset(path) as ds:
-        assert ds.longitude.min() >= 0
-
-        # set temporal subset for the ts data (hydro years)
-        if gdir.hemisphere == 'nh':
-            sm = cfg.PARAMS['hydro_month_nh']
-        elif gdir.hemisphere == 'sh':
-            sm = cfg.PARAMS['hydro_month_sh']
-
-        em = sm - 1 if (sm > 1) else 12
-
-        yrs = ds['time.year'].data
-        y0 = yrs[0] if y0 is None else y0
-        y1 = yrs[-1] if y1 is None else y1
-
-        if y1 > 2018 or y0 < 1979:
-            text = 'The climate files only go from 1979--2018,\
-                choose another y0 and y1'
-            raise InvalidParamsError(text)
-        # if default settings: this is the last day in March or September
-        time_f = '{}-{:02d}'.format(y1, em)
-        end_day = int(ds.sel(time=time_f).time.dt.daysinmonth[-1].values)
-
-        #  this was tested also for hydro_month = 1
-        ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
-                               '{}-{:02d}-{}'.format(y1, em, end_day)))
-
-        try:
-            # computing all the distances and choose the nearest gridpoint
-            c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2
-            ds = ds.isel(points=c.argmin())
-        # I turned this around
-        except ValueError:
-            ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
-            # normally if I do the flattening, this here should not occur
-
-        # temperature should be in degree Celsius for the glacier climate files
-        temp = ds['t2m'].data - 273.15
-        time = ds.time.data
-
-        ref_lon = float(ds['longitude'])
-        ref_lat = float(ds['latitude'])
-
-        ref_lon = ref_lon - 360 if ref_lon > 180 else ref_lon
-
-    # pre should be done as in ERA5dr datasets
-    with xr.open_dataset(get_ecmwf_file(dataset_othervars, 'pre')) as ds:
-        assert ds.longitude.min() >= 0
-
-        yrs = ds['time.year'].data
-        y0 = yrs[0] if y0 is None else y0
-        y1 = yrs[-1] if y1 is None else y1
-        # Attention here we take the same y0 and y1 as given from the
-        # daily tmp dataset (goes till end of 2018)
-
-        ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
-                               '{}-{:02d}-01'.format(y1, em)))
-        try:
-            # prcp is not flattened, so this here should work normally
-            ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
-        except ValueError:
-            # if Flattened ERA5_precipitation?
-            c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2
-            ds = ds.isel(points=c.argmin())
-
-        # the prcp dataset needs to be restructured to have values for each day
-        prcp = ds['tp'].data * 1000
-        # just assume that precipitation is every day the same:
-        prcp = np.repeat(prcp, ds['time.daysinmonth'])
-        # Attention the unit is now prcp per day
-        # (not per month as in OGGM default:
-        # prcp = ds['tp'].data * 1000 * ds['time.daysinmonth']
-
-    if cluster:
-        path_inv = cluster_path + BASENAMES[dataset]['inv']
-    else:
-        path_inv = get_ecmwf_file(dataset, 'inv')
-    with xr.open_dataset(path_inv) as ds:
-        assert ds.longitude.min() >= 0
-        ds = ds.isel(time=0)
-        try:
-            # Flattened ERA5_invariant (only possibility at the moment)
-            c = (ds.longitude - lon)**2 + (ds.latitude - lat)**2
-            ds = ds.isel(points=c.argmin())
-        except ValueError:
-            # this should not occur
-            ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
-
-        G = cfg.G  # 9.80665
-        hgt = ds['z'].data / G
-
-    temp_std = None
-    path_lapserates = get_ecmwf_file(dataset_othervars, 'lapserates')
-    with xr.open_dataset(path_lapserates) as ds:
-        assert ds.longitude.min() >= 0
-
-        yrs = ds['time.year'].data
-        y0 = yrs[0] if y0 is None else y0
-        y1 = yrs[-1] if y1 is None else y1
-        # Attention here we take the same y0 and y1 as given from the
-        # daily tmp dataset
-
-        ds = ds.sel(time=slice('{}-{:02d}-01'.format(y0, sm),
-                               '{}-{:02d}-01'.format(y1, em)))
-
-        # no flattening done for the ERA5dr gradient dataset
-        ds = ds.sel(longitude=lon, latitude=lat, method='nearest')
-
-        # get the monthly gradient values
-        gradient = ds['lapserate'].data
-
-        # gradient needs to be restructured to have values for each day
-        gradient = np.repeat(gradient, ds['time.daysinmonth'])
-        # assume same gradient for each day
-
-    # OK, ready to write
-    write_climate_file(gdir, time, prcp, temp, hgt, ref_lon, ref_lat,
-                       filesuffix=output_filesuffix,
-                       temporal_resol='daily',
-                       gradient=gradient,
-                       temp_std=temp_std,
-                       source=dataset,
-                       file_name='climate_historical')
 
 
 class TIModel_Parent(MassBalanceModel):
@@ -877,7 +402,7 @@ class TIModel_Parent(MassBalanceModel):
 
     """
 
-    def __init__(self, gdir, melt_f, prcp_fac=2.5, residual=0,
+    def __init__(self, gdir, melt_f=melt_f, prcp_fac=2.5, residual=0,
                  mb_type='mb_pseudo_daily', N=100, loop=False,
                  temp_std_const_from_hist = False,
                  grad_type='cte', filename='climate_historical',
@@ -1002,15 +527,14 @@ class TIModel_Parent(MassBalanceModel):
             need to be prescribed, e.g. such that
             |mean(MODEL_MB)-mean(REF_MB)|--> 0
         """
-
+        # melt_f is only initiated here, and not used in __init__
+        # so it does not matter if it is changed
+        # just enforce it then it is easier for run_from_climate_data ...
         if mb_type == 'mb_pseudo_daily_fake':
             temp_std_const_from_hist = True
             mb_type = 'mb_pseudo_daily'
         self.mb_type = mb_type
 
-        # melt_f is only initiated here, and not used in __init__
-        # so it does not matter if it is changed
-        # just enforce it then it is easier for run_from_climate_data ...
         self._melt_f = melt_f
         if self._melt_f != None and self._melt_f <= 0:
             raise InvalidParamsError('melt_f has to be above zero!')
@@ -2261,6 +1785,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # doc_TIModel_Sfc_Type =
         """
         Other terms are equal to TIModel_Parent!
+        todo Fabi: need to inherit them here
         The following parameters are initialized specifically only for TIModel_Sfc_Type
 
         Parameters
@@ -3290,1291 +2815,3 @@ class TIModel_Sfc_Type(TIModel_Parent):
 
         return optimization.brentq(to_minimize, *self.valid_bounds, xtol=0.1)
 
-
-# copy of MultipleFlowlineMassBalance that works with TIModel
-class MultipleFlowlineMassBalance_TIModel(MassBalanceModel):
-    """ Adapted MultipleFlowlineMassBalance that is compatible for all TIModel classes
-
-    TODO: do better documentation
-
-    Handle mass-balance at the glacier level instead of flowline level.
-
-    Convenience class doing not much more than wrapping a list of mass-balance
-    models, one for each flowline.
-
-    This was useful for real-case studies, where each flowline had a
-    different MB parameters. TIModel and TIModel_Sfc_Type only works with a single flowline (elevation band flowline).
-    Here we just use MultipleFlowlineMassBalance_TIModel to make it easier for "coupling" it to default OGGM stuff
-    from the dynamics flowline stuff.
-
-    Attributes
-    ----------
-    fls : list
-        list of flowline objects
-    mb_models : list
-        list of mass-balance objects
-    """
-
-    def __init__(self, gdir, fls=None, melt_f=None, prcp_fac=None,
-                 mb_model_class=TIModel, use_inversion_flowlines=False,
-                 input_filesuffix='', bias=0,
-                 **kwargs):
-        """Initialize.
-
-        Parameters
-        ----------
-        gdir : GlacierDirectory
-            the glacier directory
-        fls :
-        melt_f : float
-            melt factor
-            (has to be set to a value!)
-        prcp-fac : float
-            multiplicative precipitation factor
-            (has to be set to a value)
-        mb_model_class : class, optional
-            the mass-balance model to use (e.g. PastMassBalance,
-            ConstantMassBalance...)
-        use_inversion_flowlines: bool, optional
-            if True 'inversion_flowlines' instead of 'model_flowlines' will be
-            used.
-        input_filesuffix : str
-            the file suffix of the input climate file
-        bias :
-            default is 0
-        kwargs : kwargs to pass to mb_model_class
-        """
-
-        # Read in the flowlines
-        if use_inversion_flowlines:
-            fls = gdir.read_pickle('inversion_flowlines')
-
-        if fls is None:
-            try:
-                fls = gdir.read_pickle('model_flowlines')
-            except FileNotFoundError:
-                raise InvalidWorkflowError('Need a valid `model_flowlines` '
-                                           'file. If you explicitly want to '
-                                           'use `inversion_flowlines`, set '
-                                           'use_inversion_flowlines=True.')
-
-        self.fls = fls
-        _y0 = kwargs.get('y0', None)
-
-        # Initialise the mb models
-        self.flowline_mb_models = []
-        for fl in self.fls:
-            # Merged glaciers will need different climate files, use filesuffix
-            if (fl.rgi_id is not None) and (fl.rgi_id != gdir.rgi_id):
-                rgi_filesuffix = '_' + fl.rgi_id + input_filesuffix
-            else:
-                rgi_filesuffix = input_filesuffix
-
-            # merged glaciers also have a different MB bias from calibration
-            if ((bias is None) and cfg.PARAMS['use_bias_for_run'] and
-                    (fl.rgi_id != gdir.rgi_id)):
-                df = gdir.read_json('local_mustar', filesuffix='_' + fl.rgi_id)
-                fl_bias = df['bias']
-            else:
-                fl_bias = bias
-
-            # Constant and RandomMassBalance need y0 if not provided
-            #if (issubclass(mb_model_class, RandomMassBalance) or
-            #    issubclass(mb_model_class, ConstantMassBalance)) and (
-            #        fl.rgi_id != gdir.rgi_id) and (_y0 is None):#
-
-            #    df = gdir.read_json('local_mustar', filesuffix='_' + fl.rgi_id)
-            #    kwargs['y0'] = df['t_star']
-
-            if ((issubclass(mb_model_class, TIModel_Parent))
-                    or (issubclass(mb_model_class, RandomMassBalance_TIModel))
-                    or (issubclass(mb_model_class, ConstantMassBalance_TIModel))
-                    or (issubclass(mb_model_class, AvgClimateMassBalance_TIModel))):
-                self.flowline_mb_models.append(
-                    mb_model_class(gdir, melt_f, prcp_fac=prcp_fac,
-                                   residual=fl_bias,
-                                   baseline_climate=rgi_filesuffix,
-                                    **kwargs))
-            else:
-                self.flowline_mb_models.append(
-                    mb_model_class(gdir, mu_star=fl.mu_star, bias=fl_bias,
-                                   input_filesuffix=rgi_filesuffix, **kwargs))
-
-        self.valid_bounds = self.flowline_mb_models[-1].valid_bounds
-        self.hemisphere = gdir.hemisphere
-
-    @property
-    def temp_bias(self):
-        """Temperature bias to add to the original series."""
-        return self.flowline_mb_models[0].temp_bias
-
-    @temp_bias.setter
-    def temp_bias(self, value):
-        """Temperature bias to add to the original series."""
-        for mbmod in self.flowline_mb_models:
-            mbmod.temp_bias = value
-
-    @property
-    def prcp_fac(self):
-        """Precipitation factor to apply to the original series."""
-        return self.flowline_mb_models[0].prcp_fac
-
-    @prcp_fac.setter
-    def prcp_fac(self, value):
-        """Precipitation factor to apply to the original series."""
-        for mbmod in self.flowline_mb_models:
-            mbmod.prcp_fac = value
-
-    @property
-    def bias(self):
-        """Residual bias to apply to the original series."""
-        return self.flowline_mb_models[0].residual
-
-    @bias.setter
-    def bias(self, value):
-        """Residual bias to apply to the original series."""
-        for mbmod in self.flowline_mb_models:
-            mbmod.residual = value
-
-    def get_daily_mb(self, heights, year=None, fl_id=None, **kwargs):
-
-        if fl_id is None:
-            raise ValueError('`fl_id` is required for '
-                             'MultipleFlowlineMassBalance!')
-
-        return self.flowline_mb_models[fl_id].get_daily_mb(heights,
-                                                             year=year,
-                                                             **kwargs)
-
-    def get_monthly_mb(self, heights, year=None, fl_id=None, **kwargs):
-
-        if fl_id is None:
-            raise ValueError('`fl_id` is required for '
-                             'MultipleFlowlineMassBalance!')
-
-        return self.flowline_mb_models[fl_id].get_monthly_mb(heights,
-                                                             year=year,
-                                                             **kwargs)
-
-    def get_annual_mb(self, heights, year=None, fl_id=None, **kwargs):
-
-        if fl_id is None:
-            raise ValueError('`fl_id` is required for '
-                             'MultipleFlowlineMassBalance!')
-
-        return self.flowline_mb_models[fl_id].get_annual_mb(heights,
-                                                            year=year,
-                                                            **kwargs)
-
-    def get_annual_mb_on_flowlines(self, fls=None, year=None):
-        """Get the MB on all points of the glacier at once.
-
-        Parameters
-        ----------
-        fls: list, optional
-            the list of flowlines to get the mass-balance from. Defaults
-            to self.fls
-        year: float, optional
-            the time (in the "floating year" convention)
-        Returns
-        -------
-        Tuple of (heights, widths, mass_balance) 1D arrays
-        """
-
-        if fls is None:
-            fls = self.fls
-
-        heights = []
-        widths = []
-        mbs = []
-        for i, fl in enumerate(fls):
-            h = fl.surface_h
-            heights = np.append(heights, h)
-            widths = np.append(widths, fl.widths)
-            mbs = np.append(mbs, self.get_annual_mb(h, year=year, fl_id=i))
-
-        return heights, widths, mbs
-
-    def get_specific_mb(self, heights=None, widths=None, fls=None,
-                        year=None, **kwargs):
-
-        """ computes specific mass-balance for each year in [kg /m2]"""
-
-        if heights is not None or widths is not None:
-            raise ValueError('`heights` and `widths` kwargs do not work with '
-                             'MultipleFlowlineMassBalance!')
-
-        if fls is None:
-            fls = self.fls
-
-        if len(np.atleast_1d(year)) > 1:
-            out = [self.get_specific_mb(fls=fls, year=yr, **kwargs) for yr in year]
-            return np.asarray(out)
-
-        mbs = []
-        widths = []
-        for i, (fl, mb_mod) in enumerate(zip(self.fls, self.flowline_mb_models)):
-            _widths = fl.widths
-            try:
-                # For rect and parabola don't compute spec mb
-                _widths = np.where(fl.thick > 0, _widths, 0)
-            except AttributeError:
-                pass
-            widths = np.append(widths, _widths)
-            mb = mb_mod.get_annual_mb(fl.surface_h, year=year, fls=fls,
-                                      fl_id=i, **kwargs)
-            mbs = np.append(mbs, mb * SEC_IN_YEAR * mb_mod.rho)
-        return np.average(mbs, weights=widths)
-
-    def get_ela(self, year=None, **kwargs):
-
-        # ELA here is not without ambiguity.
-        # We compute a mean weighted by area.
-
-        if len(np.atleast_1d(year)) > 1:
-            return np.asarray([self.get_ela(year=yr) for yr in year])
-
-        elas = []
-        areas = []
-        for fl_id, (fl, mb_mod) in enumerate(zip(self.fls,
-                                                 self.flowline_mb_models)):
-            elas = np.append(elas, mb_mod.get_ela(year=year, fl_id=fl_id,
-                                                  fls=self.fls))
-            areas = np.append(areas, np.sum(fl.widths))
-
-        return np.average(elas, weights=areas)
-
-
-
-class ConstantMassBalance_TIModel(MassBalanceModel):
-    """Constant mass-balance during a chosen period.
-
-    if interpolation_optim=True and mb_model_sub_class
-    the goal is actually to create once a cte bucket profile (via spinup),
-     and then leave this and do the interpolation
-     -> we assume that the buckets are constant over the whole running period,
-      so we just do once the computation of the mass balance for different heights
-      & reuse it then again without considering that the surface type changes
-      over time ... at the end we might need to use an emulation anyway so it
-     is not such a problem
-
-    This is useful for equilibrium experiments.
-    """
-
-    def __init__(self, gdir, melt_f=None, prcp_fac = None,
-                 mb_model_sub_class = TIModel,
-                 residual = 0,
-                 baseline_climate=None,
-                 input_filesuffix='default',
-                 filename='climate_historical',
-                 y0=None, halfsize=15,
-                 interpolation_optim=False,
-                 **kwargs):
-        """Initialize
-
-        Parameters
-        ----------
-        gdir : GlacierDirectory
-            the glacier directory
-        melt_f : float
-            melt factor (has to be set to a value!)
-        prcp-fac :
-            multiplicative precipitation factor (has to be set to a value)
-        mb_model_sub_class : class, optional
-            the mass-balance model to use: either TIModel (default)
-            or TIModel_Sfc_Type
-        residual :
-            default for TIModel's is 0 ! (best is to not change!)
-        input_filesuffix : str
-            defult is '', filesuffix of climate file that should be used
-        filename : str
-            climate filename, default is 'climate_historical',
-        y0 : int
-            the year at the center of the period of interest, needs to be set!!!
-        halfsize : int, optional
-            the half-size of the time window (window size = 2 * halfsize + 1),
-            default are 15 years
-        **kwargs :
-            stuff passed to the TIModel instance!
-        """
-        #filename = 'climate_historical',
-        #input_filesuffix = '',
-        super(ConstantMassBalance_TIModel, self).__init__()
-
-        self.interpolation_optim = interpolation_optim
-
-        if y0 is None:
-            raise InvalidWorkflowError('need to set y0 as we do not '
-                                       'use tstar in this case')
-        # This is a quick'n dirty optimisation
-        try:
-            fls = gdir.read_pickle('model_flowlines')
-            h = []
-            for fl in fls:
-                # We use bed because of overdeepenings
-                h = np.append(h, fl.bed_h)
-                h = np.append(h, fl.surface_h)
-            zminmax = np.round([np.min(h)-50, np.max(h)+2000])
-        except FileNotFoundError:
-            # in case we don't have them
-            with ncDataset(gdir.get_filepath('gridded_data')) as nc:
-                if np.isfinite(nc.min_h_dem):
-                    # a bug sometimes led to non-finite
-                    zminmax = [nc.min_h_dem-250, nc.max_h_dem+1500]
-                else:
-                    zminmax = [nc.min_h_glacier-1250, nc.max_h_glacier+1500]
-        self.hbins = np.arange(*zminmax, step=10)
-        self.valid_bounds = self.hbins[[0, -1]]
-        self.y0 = y0
-        self.halfsize = halfsize
-        self.years = np.arange(y0-halfsize, y0+halfsize+1)
-        self.hemisphere = gdir.hemisphere
-
-        if mb_model_sub_class == TIModel_Sfc_Type:
-            # was not sure how to add something to **kwargs
-            kwargs2 = {'check_availability': False,
-                       'interpolation_optim': interpolation_optim,
-                       'hbins': self.hbins}
-
-        else:
-            interpolation_optim = True
-            kwargs2 = {}
-
-        self.mbmod = mb_model_sub_class(gdir, melt_f=melt_f,
-                                         prcp_fac=prcp_fac, residual=residual,
-                                         input_filesuffix=input_filesuffix,
-                                        baseline_climate=baseline_climate,
-                                         filename=filename,
-                                         **kwargs, **kwargs2)
-
-        self._mb_debug_container = pd.DataFrame({'yr': [], #'ryr': [],
-                                                 'heights': [], 'mb': []})
-
-    @property
-    def temp_bias(self):
-        """Temperature bias to add to the original series."""
-        return self.mbmod.temp_bias
-
-    @temp_bias.setter
-    def temp_bias(self, value):
-        """Temperature bias to add to the original series."""
-        for attr_name in ['_lazy_interp_yr', '_lazy_interp_m']:
-            if hasattr(self, attr_name):
-                delattr(self, attr_name)
-        self.mbmod.temp_bias = value
-
-    @property
-    def prcp_fac(self):
-        """Precipitation factor to apply to the original series."""
-        return self.mbmod.prcp_fac
-
-    @prcp_fac.setter
-    def prcp_fac(self, value):
-        """Precipitation factor to apply to the original series."""
-        for attr_name in ['_lazy_interp_yr', '_lazy_interp_m']:
-            if hasattr(self, attr_name):
-                delattr(self, attr_name)
-        self.mbmod.prcp_fac = value
-
-    def historical_climate_qc_mod(self, gdir):
-        return self.mbmod.historical_climate_qc_mod(gdir)
-
-    @property
-    def residual(self):
-        """Residual bias to apply to the original series."""
-        return self.mbmod.residual
-
-    @residual.setter
-    def residual(self, value):
-        """Residual bias to apply to the original series."""
-        self.mbmod.residual = value
-
-    def reset_pd_mb_bucket(self, init_model_fls='use_inversion_flowline'):
-        if self.interpolation_optim:
-            self.mbmod._pd_mb_template_bucket = pd.DataFrame(0,
-                                                      index=self.hbins[::-1],
-                                                      columns=self.mbmod.columns)
-
-            self.mbmod._pd_mb_template_bucket.index.name = 'hbins_height'
-
-            self.mbmod.pd_mb_monthly = self.mbmod._pd_mb_template.copy()
-            self.mbmod.pd_mb_annual = self.mbmod._pd_mb_template.copy()
-
-            pd_bucket = self.mbmod._pd_mb_template_bucket.copy()
-            # pd_bucket[self.mbmod.columns] = 0
-            self.mbmod.pd_bucket = pd_bucket
-        else:
-            self.mbmod.reset_pd_mb_bucket(init_model_fls=init_model_fls)
-    @lazy_property
-    def interp_yr(self, **kwargs):
-        mb_on_h = self.hbins*0.
-        for yr in self.years:
-            if self.mbmod.__class__ == TIModel_Sfc_Type:
-                # just compute once the bucket distribution, then assume t
-                if self.mbmod.spinup_yrs == 0:
-                #    # because we can only indirectly "transmit" it from lazy_property
-                    kwargs['spinup'] = False
-                else:
-                    kwargs['spinup'] = True
-                mb_on_h += self.mbmod.get_annual_mb(self.hbins[::-1],
-                                                    year=yr, **kwargs)
-            else:
-                mb_on_h += self.mbmod.get_annual_mb(self.hbins, year=yr)
-        if self.mbmod.__class__ == TIModel_Sfc_Type:
-            return interp1d(self.hbins, mb_on_h[::-1]/ len(self.years))
-        else:
-            return interp1d(self.hbins, mb_on_h/len(self.years))
-
-
-    @lazy_property
-    def interp_m(self):
-        # monthly MB
-        if self.mbmod.__class__ == TIModel_Sfc_Type:
-            raise NotImplementedError('need to implement it for TIModel_Sfc_Type')
-        else:
-            months = np.arange(12)+1
-            interp_m = []
-            for m in months:
-                mb_on_h = self.hbins*0.
-                for yr in self.years:
-                    yr = date_to_floatyear(yr, m)
-                    mb_on_h += self.mbmod.get_monthly_mb(self.hbins, year=yr)
-                interp_m.append(interp1d(self.hbins, mb_on_h / len(self.years)))
-            return interp_m
-
-    def get_monthly_climate(self, heights, year=None):
-        """Average climate information at given heights.
-
-        Note that prcp is corrected with the precipitation factor and that
-        all other biases (precipitation, temp) are applied
-
-        Returns
-        -------
-        (temp, tempformelt, prcp, prcpsol)
-        """
-        _, m = floatyear_to_date(year)
-        yrs = [date_to_floatyear(y, m) for y in self.years]
-        heights = np.atleast_1d(heights)
-        nh = len(heights)
-        shape = (len(yrs), nh)
-        temp = np.zeros(shape)
-        tempformelt = np.zeros(shape)
-        prcp = np.zeros(shape)
-        prcpsol = np.zeros(shape)
-        for i, yr in enumerate(yrs):
-            t, tm, p, ps = self.mbmod.get_monthly_climate(heights, year=yr)
-            temp[i, :] = t
-            tempformelt[i, :] = tm
-            prcp[i, :] = p
-            prcpsol[i, :] = ps
-        return (np.mean(temp, axis=0),
-                np.mean(tempformelt, axis=0),
-                np.mean(prcp, axis=0),
-                np.mean(prcpsol, axis=0))
-
-    def get_annual_climate(self, heights, year=None):
-        """Average climate information at given heights.
-
-        Note that prcp is corrected with the precipitation factor and that
-        all other biases (precipitation, temp) are applied
-
-        Attention: temperature for melt of
-        is either in sum over monthly mean or in annual sum (if real_daily)!
-
-        Returns
-        -------
-        (temp, tempformelt, prcp, prcpsol)
-        """
-        yrs = monthly_timeseries(self.years[0], self.years[-1],
-                                 include_last_year=True)
-        heights = np.atleast_1d(heights)
-        nh = len(heights)
-        shape = (len(yrs), nh)
-        temp = np.zeros(shape)
-        tempformelt = np.zeros(shape)
-        prcp = np.zeros(shape)
-        prcpsol = np.zeros(shape)
-        for i, yr in enumerate(yrs):
-            t, tm, p, ps = self.mbmod.get_monthly_climate(heights, year=yr)
-            temp[i, :] = t
-            tempformelt[i, :] = tm
-            prcp[i, :] = p
-            prcpsol[i, :] = ps
-        # Note that we do not weight for number of days per month:
-        # this is consistent with OGGM's calendar
-        return (np.mean(temp, axis=0),
-                np.mean(tempformelt, axis=0) * 12,
-                np.mean(prcp, axis=0) * 12,
-                np.mean(prcpsol, axis=0) * 12)
-
-    def get_monthly_mb(self, heights, year=None,
-                       add_climate=False, **kwargs):
-        if self.mbmod.__class__ == TIModel_Sfc_Type and not self.interpolation_optim:
-            raise NotImplementedError('need to implement it for TIModel_Sfc_Type')
-            yr, m = floatyear_to_date(year)
-
-            months = np.arange(12) + 1
-            interp_m = []
-            # askFabi shouldnt we first loop over years and then over months
-            for m in months:
-                mb_on_h = heights * 0.
-                for yr in self.years:
-                    yr = date_to_floatyear(yr, m)
-                    mb_on_h += self.mbmod.get_monthly_mb(self.hbins,
-                                                         year=yr,
-                                                         **kwargs)
-                interp_m.append(interp1d(self.hbins, mb_on_h / len(self.years)))
-
-            if add_climate:
-                t, tmelt, prcp, prcpsol = self.get_monthly_climate(heights,
-                                                                   year=year)
-                return mb, t, tmelt, prcp, prcpsol
-            return mb
-        else:
-            yr, m = floatyear_to_date(year)
-            if add_climate:
-                t, tmelt, prcp, prcpsol = self.get_monthly_climate(heights,
-                                                                   year=year)
-                return self.interp_m[m-1](heights), t, tmelt, prcp, prcpsol
-            return self.interp_m[m-1](heights)
-
-    def get_annual_mb(self, heights, year=None,
-                      add_climate=False, **kwargs):
-        if self.mbmod.__class__ == TIModel_Sfc_Type and not self.interpolation_optim:
-            # slow version ... (without interp_yr) ... if interp_yr version works,
-            # can say that this should run only for comparison ???
-            mb_on_h = heights * 0. # self.hbins
-            for yr in self.years:
-                # in the first yr it computes the spinup, but afterwards not anymore
-                try:
-                    if kwargs['bucket_output']:
-                        mb_on_h_yr, pd_bucket = self.mbmod.get_annual_mb(heights,
-                                                            year=yr,
-                                                            **kwargs)
-                        mb_on_h += mb_on_h_yr
-                except:
-                    mb_on_h += self.mbmod.get_annual_mb(heights,
-                                                        year=yr,
-                                                        **kwargs)
-            mb = mb_on_h / len(self.years)
-            #mb = self.interp_yr(heights)
-            # #raise NotImplementedError('need to implement it for TIModel_Sfc_Type')
-        else:
-            use_new = True
-            if use_new:
-                if self.mbmod.__class__ == TIModel_Sfc_Type and 'spinup' in kwargs:
-                    #try:
-                    #    kwargs_2 = kwargs['spinup']
-                    # remove the fls kwargs if inside
-                    #if 'fls' in kwargs:
-                    #    kwargs.pop('fls')
-                    if not kwargs['spinup']:
-                        # if spinup_yrs is = 0, it is the same as saying spinup=False
-                        # but it can be "transmitted" to the lazy-property self.interp_yr
-                        # (just transmitting the kwargs gave an error such as:
-                        # TypeError: __call__() got an unexpected keyword argument 'spinup'
-                        # mb = self.interp_yr(heights, **kwargs)
-
-                        self.mbmod.spinup_yrs = 0
-                #else:
-                #    #todo test if this works at tleast for TIModel
-                mb = self.interp_yr(heights)
-            else:
-                if self.mbmod.__class__ == TIModel_Sfc_Type:
-                    # try:
-                    #    kwargs_2 = kwargs['spinup']
-                    # remove the fls kwargs
-                    kwargs.pop('fls')
-                    mb = self.interp_yr(heights, **kwargs)
-                else:
-                    # todo test if this works at tleast for TIModel
-                    mb = self.interp_yr(heights)
-
-        pd_out = pd.DataFrame({'yr': year, 'heights': heights, 'mb': mb})
-        self._mb_debug_container = self._mb_debug_container.append(pd_out)
-
-        if add_climate:
-            t, tmelt, prcp, prcpsol = self.get_annual_climate(heights)
-            try:
-                if kwargs['bucket_output']:
-                    return mb, t, tmelt, prcp, prcpsol, pd_bucket
-            except:
-                return mb, t, tmelt, prcp, prcpsol
-        else:
-            try:
-                if kwargs['bucket_output']:
-                    return mb, pd_bucket
-            except:
-                return mb
-
-
-
-class AvgClimateMassBalance_TIModel(ConstantMassBalance_TIModel):
-    """Mass balance with the average climate of a selected period compatible with TIModel
-    only works for TIModel (without sfc type distinction)
-
-    !!!Careful! This is conceptually wrong!!! This is here only to make
-    a point.
-
-    See https://oggm.org/2021/08/05/mean-forcing/
-    """
-
-    def __init__(self, gdir, melt_f=None, prcp_fac = None,
-                 mb_model_sub_class = TIModel,
-                 residual = 0,
-                 baseline_climate=None,
-                 input_filesuffix='default',
-                 filename='climate_historical',
-                 y0=None, halfsize=15,
-                 interpolation_optim=False,
-                 **kwargs):
-
-        """Initialize.
-
-        Parameters
-        TODO
-        """
-
-
-
-        super(AvgClimateMassBalance_TIModel, self).__init__(gdir, melt_f=melt_f,
-                                                    residual=residual,
-                                                    filename=filename,
-                                                    input_filesuffix=input_filesuffix,
-                                                    y0=y0, halfsize=halfsize,
-                                                    baseline_climate=baseline_climate,
-                                                    prcp_fac=prcp_fac,
-                                                    interpolation_optim=interpolation_optim,
-                                                    **kwargs)
-
-
-        self.mbmod = mb_model_sub_class(gdir, melt_f=melt_f, residual=residual,
-                                        prcp_fac=prcp_fac,baseline_climate=baseline_climate,
-                                     filename=filename,
-                                     input_filesuffix=input_filesuffix,
-                                     ys=y0-halfsize, ye=y0+halfsize,
-                                     **kwargs)
-
-        if self.mbmod.mb_type == 'mb_real_daily':
-            raise NotImplementedError('real_daily needs to be implemented!!!')
-        #years_pok = np.arange(y0-halfsize, y0+halfsize+1)
-        #if self.repeat:
-        #    y = self.ys + (y - self.ys) % (self.ye - self.ys + 1)
-        #if y < self.ys or y > self.ye:
-        #    raise ValueError('year {} out of the valid time bounds: '
-        #                     '[{}, {}]'.format(y, self.ys, self.ye))
-
-        # if self.mb_type == 'mb_real_daily' or climate_type == 'annual':
-        #     if climate_type == 'annual':
-        #         #if type(year) == float:
-        #         #    raise InvalidParamsError('')
-        #         pok = np.where(self.mbmod.years == year)[0]
-        #         if len(pok) < 1:
-        #             raise ValueError('Year {} not in record'.format(int(year)))
-        #     else:
-        #         pok = np.where((self.years == y) & (self.months == m))[0]
-        #         if len(pok) < 28:
-        #             warnings.warn('something goes wrong with amount of entries\
-        #                           per month for mb_real_daily')
-        # else:
-        #     pok = np.where((self.years == y) & (self.months == m))[0][0]
-
-        if self.mbmod.mb_type == 'mb_monthly' or 'mb_pseudo_daily':
-            pok = (self.mbmod.years >= y0 - halfsize)
-            pok = pok & (self.mbmod.years <= y0 + halfsize)
-            #if y0 - halfsize is not None:
-            #    pok = self.mbmod.years >= y0 - halfsize
-            #if y0 + halfsize is not None:
-            #    try:
-            #        pok = pok & (self.mbmod.years <= y0 + halfsize)
-            #    except TypeError:
-            #        pok = self.mbmod.years <= y0 + halfsize
-        tmp = self.mbmod.temp[pok]
-
-        assert (len(tmp) // 12) == (halfsize * 2 + 1)
-
-        self.mbmod.temp = tmp.reshape((len(tmp) // 12, 12)).mean(axis=0)
-        # problematic to do that ....!!!! mean of std
-        if self.mbmod.mb_type =='mb_pseudo_daily':
-            tmp = self.mbmod.temp_std[pok]
-            self.mbmod.temp_std = tmp.reshape((len(tmp) // 12, 12)).mean(axis=0)
-
-        tmp = self.mbmod.prcp[pok]
-        self.mbmod.prcp = tmp.reshape((len(tmp) // 12, 12)).mean(axis=0)
-        tmp = self.mbmod.grad[pok]
-        self.mbmod.grad = tmp.reshape((len(tmp) // 12, 12)).mean(axis=0)
-
-        self.mbmod.ys = y0
-        self.mbmod.ye = y0
-        self.mbmod.months = np.arange(1, 13, dtype=int)
-        self.mbmod.years = np.asarray([y0]*12)
-        self.years = np.asarray([y0]*12)
-
-
-@entity_task(log)
-def fixed_geometry_mass_balance_TIModel(gdir, ys=None, ye=None,
-                                        years=None,
-                                monthly_step=False,
-                                use_inversion_flowlines=True,
-                                climate_filename='climate_historical',
-                                climate_input_filesuffix='',
-                                ds_gcm = None,
-                                        from_json = False,
-                                        json_filename='',
-                                        sfc_type=False,
-                                **kwargs):
-    """Computes the mass-balance with climate input
-    from e.g. CRU or a GCM.
-
-    Parameters
-    ----------
-    gdir : :py:class:`oggm.GlacierDirectory`
-        the glacier directory to process
-    ys : int
-        start year of the model run (default: from the climate file)
-        date)
-    ye : int
-        end year of the model run (default: from the climate file)
-    years : array of ints
-        override ys and ye with the years of your choice
-    monthly_step : bool
-        whether to store the diagnostic data at a monthly time step or not
-        (default is yearly)
-    use_inversion_flowlines : bool
-        whether to use the inversion flowlines or the model flowlines
-    climate_filename : str
-        name of the climate file, e.g. 'climate_historical' (default) or
-        'gcm_data'
-    climate_input_filesuffix: str
-        filesuffix for the input climate file
-    ds_gcm : xarray dataset
-        netCDF dataset output of the gdir 
-    **kwargs:
-        added to MultipleFlowlineMassBalance_TIModel
-    """
-    temp_bias = 0
-    if sfc_type == False or sfc_type == 'False':
-        mb_model_sub_class = TIModel
-        kwargs_for_TIModel_Sfc_Type = {}
-    else:
-        mb_model_sub_class = TIModel_Sfc_Type
-        kwargs_for_TIModel_Sfc_Type = {}
-        # try:
-        # melt_f_update =
-        # except:
-        #    melt_f_update = 'monthly'
-        kwargs_for_TIModel_Sfc_Type['melt_f_update'] = kwargs['melt_f_update']
-        kwargs_for_TIModel_Sfc_Type['melt_f_change'] = sfc_type
-        kwargs_for_TIModel_Sfc_Type['tau_e_fold_yr'] = kwargs['tau_e_fold_yr']
-    if monthly_step:
-        raise NotImplementedError('monthly_step not implemented yet')
-    if ds_gcm != None or from_json:
-        if ds_gcm!=None:
-            melt_f = ds_gcm.sel(rgi_id=gdir.rgi_id).melt_f.values
-            pf = ds_gcm.sel(rgi_id=gdir.rgi_id).pf.values
-        elif from_json:
-            if sfc_type is not False:
-                if kwargs_for_TIModel_Sfc_Type['melt_f_update'] == 'annual':
-                    fs_new = '_{}_sfc_type_{}_annual_{}_{}'.format('W5E5', sfc_type, kwargs['mb_type'],
-                                                            kwargs['grad_type'])
-                else:
-                    fs_new = '_{}_sfc_type_{}_{}_{}'.format('W5E5', sfc_type, kwargs['mb_type'],
-                                                            kwargs['grad_type'])
-            else:
-                fs_new = '_{}_sfc_type_{}_{}_{}'.format('W5E5', sfc_type, kwargs['mb_type'],
-                                                    kwargs['grad_type'])
-            # json_filename = 'melt_f_geod_opt_winter_mb_approx_std'
-            # get the calibrated melt_f that suits to the prcp factor
-            try:
-                d = gdir.read_json(filename=json_filename,
-                                   filesuffix=fs_new)
-                # get the corrected ref_hgt so that we can apply this again on the mb model
-                # if otherwise not melt_f could be found!
-                pf = d['pf']
-                melt_f = d['melt_f']
-                temp_bias = d['temp_bias']
-            except:
-                raise InvalidWorkflowError(
-                    'there is no calibrated melt_f for this precipitation factor, glacier, climate'
-                    'mb_type and grad_type, need to do the calibration first!')
-
-        mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=mb_model_sub_class,
-                                                 melt_f=melt_f, prcp_fac=pf,
-                                                 filename=climate_filename,
-                                                 use_inversion_flowlines=use_inversion_flowlines,
-                                                 bias=0,
-                                                 input_filesuffix=climate_input_filesuffix,
-                                                 mb_type=kwargs['mb_type'],
-                                                 grad_type=kwargs['grad_type'],
-                                                 # check_calib_params=check_calib_params,
-                                                 **kwargs_for_TIModel_Sfc_Type)
-        mb.temp_bias = temp_bias
-    else:
-        mb = MultipleFlowlineMassBalance_TIModel(gdir, mb_model_class=TIModel,
-                                     filename=climate_filename,
-                                     use_inversion_flowlines=use_inversion_flowlines,
-                                     input_filesuffix=climate_input_filesuffix,
-                                     **kwargs)
-
-    if years is None:
-        if ys is None:
-            ys = mb.flowline_mb_models[0].ys
-        if ye is None:
-            ye = mb.flowline_mb_models[0].ye
-        years = np.arange(ys, ye + 1)
-
-
-    odf = pd.Series(data=mb.get_specific_mb(year=years),
-                    index=years)
-    return odf
-
-
-@global_task(log)
-def compile_fixed_geometry_mass_balance_TIModel(gdirs, filesuffix='',
-                                        path=True, csv=False,
-                                        climate_filename='climate_historical',
-                                        use_inversion_flowlines=True,
-                                        ys=None, ye=None, years=None,
-                                        climate_input_filesuffix='',
-                                        ds_gcm=None,
-                                                from_json=False,
-                                                json_filename='',
-                                                sfc_type=False,
-                                        **kwargs):
-    """
-    same as `compile_fixed_geometry_mass_balance` but compatible to TIModel
-
-    Compiles a table of specific mass-balance timeseries for all glaciers.
-
-    The file is stored in a hdf file (not csv) per default. Use pd.read_hdf
-    to open it.
-
-    Parameters
-    ----------
-    gdirs : list of :py:class:`oggm.GlacierDirectory` objects
-        the glacier directories to process
-    filesuffix : str
-        add suffix to output file
-    path : str, bool
-        Set to "True" in order  to store the info in the working directory
-        Set to a path to store the file to your chosen location (file
-        extension matters)
-    csv: bool
-        Set to store the data in csv instead of hdf.
-    use_inversion_flowlines : bool
-        whether to use the inversion flowlines or the model flowlines
-    ys : int
-        start year of the model run (default: from the climate file)
-        date)
-    ye : int
-        end year of the model run (default: from the climate file)
-    years : array of ints
-        override ys and ye with the years of your choice
-    kwargs :
-        passed to fixed_geometry_mass_balance_TIModel
-    todo: other docs!
-    """
-    from oggm.workflow import execute_entity_task
-    #from oggm.core.massbalance import fixed_geometry_mass_balance
-
-    out_df = execute_entity_task(fixed_geometry_mass_balance_TIModel, gdirs,
-                                 climate_filename=climate_filename,
-                                 use_inversion_flowlines=use_inversion_flowlines,
-                                 ys=ys, ye=ye, years=years,
-                                 ds_gcm=ds_gcm, from_json=from_json,
-                                 climate_input_filesuffix=climate_input_filesuffix,
-                                 json_filename=json_filename,
-                                 sfc_type=sfc_type,
-                                 **kwargs)
-
-    for idx, s in enumerate(out_df):
-        if s is None:
-            out_df[idx] = pd.Series(np.NaN)
-
-    out = pd.concat(out_df, axis=1, keys=[gd.rgi_id for gd in gdirs])
-    out = out.dropna(axis=0, how='all')
-
-    if path:
-        if path is True:
-            fpath = os.path.join(cfg.PATHS['working_dir'],
-                                 'fixed_geometry_mass_balance' + filesuffix)
-            if csv:
-                out.to_csv(fpath + '.csv')
-            else:
-                out.to_hdf(fpath + '.hdf', key='df')
-        else:
-            ext = os.path.splitext(path)[-1]
-            if ext.lower() == '.csv':
-                out.to_csv(path)
-            elif ext.lower() == '.hdf':
-                out.to_hdf(path, key='df')
-    return out
-
-
-def extend_past_climate_run_TIModel(past_run_file=None,
-                            fixed_geometry_mb_file=None,
-                            glacier_statistics_file=None,
-                            path=False,
-                            use_compression=True):
-    """Utility function to extend past MB runs prior to the RGI date.
-
-    We use a fixed geometry (and a fixed calving rate) for all dates prior
-    to the RGI date.
-
-    This is not parallelized, i.e a bit slow.
-
-    Parameters
-    ----------
-    past_run_file : str
-        path to the historical run (nc)
-    fixed_geometry_mb_file : str
-        path to the MB file (csv)
-    glacier_statistics_file : str
-        path to the glacier stats file (csv)
-    path : str
-        where to store the file
-    use_compression : bool
-
-    Returns
-    -------
-    the extended dataset
-    """
-
-    log.workflow('Applying extend_past_climate_run on '
-                 '{}'.format(past_run_file))
-
-    fixed_geometry_mb_df = pd.read_csv(fixed_geometry_mb_file, index_col=0,
-                                       low_memory=False)
-    stats_df = pd.read_csv(glacier_statistics_file, index_col=0,
-                           low_memory=False)
-
-    with xr.open_dataset(past_run_file) as past_ds:
-
-        # We need at least area and vol to do something
-        if 'volume' not in past_ds.data_vars or 'area' not in past_ds.data_vars:
-            raise InvalidWorkflowError('Need both volume and area to proceed')
-
-        y0_run = int(past_ds.time[0])
-        y1_run = int(past_ds.time[-1])
-        if (y1_run - y0_run + 1) != len(past_ds.time):
-            raise NotImplementedError('Currently only supports annual outputs')
-        y0_clim = int(fixed_geometry_mb_df.index[0])
-        y1_clim = int(fixed_geometry_mb_df.index[-1])
-        if y0_clim > y0_run or y1_clim < y0_run:
-            raise InvalidWorkflowError('Dates do not match.')
-        if y1_clim != y1_run - 1:
-            raise InvalidWorkflowError('Dates do not match.')
-        if len(past_ds.rgi_id) != len(fixed_geometry_mb_df.columns):
-            raise InvalidWorkflowError('Nb of glaciers do not match.')
-        if len(past_ds.rgi_id) != len(stats_df.index):
-            raise InvalidWorkflowError('Nb of glaciers do not match.')
-
-        # Make sure we agree on order
-        df = fixed_geometry_mb_df[past_ds.rgi_id]
-
-        # Output data
-        years = np.arange(y0_clim, y1_run+1)
-        ods = past_ds.reindex({'time': years})
-
-        # Time
-        ods['hydro_year'].data[:] = years
-        ods['hydro_month'].data[:] = ods['hydro_month'][-1]
-        if ods['hydro_month'][-1] == 1:
-            ods['calendar_year'].data[:] = years
-        else:
-            ods['calendar_year'].data[:] = years - 1
-        ods['calendar_month'].data[:] = ods['calendar_month'][-1]
-        for vn in ['hydro_year', 'hydro_month',
-                   'calendar_year', 'calendar_month']:
-            ods[vn] = ods[vn].astype(int)
-
-        # New vars
-        for vn in ['volume', 'volume_bsl', 'volume_bwl',
-                   'area', 'length', 'calving', 'calving_rate']:
-            if vn in ods.data_vars:
-                ods[vn + '_ext'] = ods[vn].copy(deep=True)
-                ods[vn + '_ext'].attrs['description'] += ' (extended with MB data)'
-
-        vn = 'volume_fixed_geom_ext'
-        ods[vn] = ods['volume'].copy(deep=True)
-        ods[vn].attrs['description'] += ' (replaced with fixed geom data)'
-
-        rho = cfg.PARAMS['ice_density']
-        # Loop over the ids
-        for i, rid in enumerate(ods.rgi_id.data):
-            # Both do not need to be same length but they need to start same
-            mb_ts = df.values[:, i]
-            orig_vol_ts = ods.volume_ext.data[:, i]
-            if not (np.isfinite(mb_ts[-1]) and np.isfinite(orig_vol_ts[-1])):
-                # Not a valid glacier
-                continue
-            if np.isfinite(orig_vol_ts[0]):
-                # Nothing to extend, really
-                continue
-
-            # First valid id
-            fid = np.argmax(np.isfinite(orig_vol_ts))
-
-            # Add calving to the mix
-            try:
-                calv_flux = stats_df.loc[rid, 'calving_flux'] * 1e9
-                calv_rate = stats_df.loc[rid, 'calving_rate_myr']
-            except KeyError:
-                calv_flux = 0
-                calv_rate = 0
-            if not np.isfinite(calv_flux):
-                calv_flux = 0
-            if not np.isfinite(calv_rate):
-                calv_rate = 0
-
-            # Fill area and length which stays constant before date
-            orig_area_ts = ods.area_ext.data[:, i]
-            orig_area_ts[:fid] = orig_area_ts[fid]
-
-            # We convert SMB to volume
-            mb_vol_ts = (mb_ts / rho * orig_area_ts[fid] - calv_flux).cumsum()
-            calv_ts = (mb_ts * 0 + calv_flux).cumsum()
-
-            # The -1 is because the volume change is known at end of year
-            mb_vol_ts = mb_vol_ts + orig_vol_ts[fid] - mb_vol_ts[fid-1]
-
-            # Now back to netcdf
-            ods.volume_fixed_geom_ext.data[1:, i] = mb_vol_ts
-            ods.volume_ext.data[1:fid, i] = mb_vol_ts[0:fid-1]
-            ods.area_ext.data[:, i] = orig_area_ts
-
-            # Optional variables
-            if 'length' in ods.data_vars:
-                orig_length_ts = ods.length_ext.data[:, i]
-                orig_length_ts[:fid] = orig_length_ts[fid]
-                ods.length_ext.data[:, i] = orig_length_ts
-
-            if 'calving' in ods.data_vars:
-                orig_calv_ts = ods.calving_ext.data[:, i]
-                # The -1 is because the volume change is known at end of year
-                calv_ts = calv_ts + orig_calv_ts[fid] - calv_ts[fid-1]
-                ods.calving_ext.data[1:fid, i] = calv_ts[0:fid-1]
-
-            if 'calving_rate' in ods.data_vars:
-                orig_calv_rate_ts = ods.calving_rate_ext.data[:, i]
-                # +1 because calving rate at year 0 is unkown from the dyns model
-                orig_calv_rate_ts[:fid+1] = calv_rate
-                ods.calving_rate_ext.data[:, i] = orig_calv_rate_ts
-
-            # Extend vol bsl by assuming that % stays constant
-            if 'volume_bsl' in ods.data_vars:
-                bsl = ods.volume_bsl.data[fid, i] / ods.volume.data[fid, i]
-                ods.volume_bsl_ext.data[:fid, i] = bsl * ods.volume_ext.data[:fid, i]
-            if 'volume_bwl' in ods.data_vars:
-                bwl = ods.volume_bwl.data[fid, i] / ods.volume.data[fid, i]
-                ods.volume_bwl_ext.data[:fid, i] = bwl * ods.volume_ext.data[:fid, i]
-
-        # Remove old vars
-        for vn in list(ods.data_vars):
-            if '_ext' not in vn and 'time' in ods[vn].dims:
-                del ods[vn]
-
-        # Rename vars to their old names
-        ods = ods.rename(dict((o, o.replace('_ext', ''))
-                              for o in ods.data_vars))
-
-        # Remove t0 (which is NaN)
-        ods = ods.isel(time=slice(1, None))
-
-        # To file?
-        if path:
-            enc_var = {'dtype': 'float32'}
-            if use_compression:
-                enc_var['complevel'] = 5
-                enc_var['zlib'] = True
-            encoding = {v: enc_var for v in ods.data_vars}
-            ods.to_netcdf(path, encoding=encoding)
-
-    return ods
-
-
-
-class RandomMassBalance_TIModel(MassBalanceModel):
-    """Random shuffle of all MB years within a given time period.
-
-    (copy of RandomMassBalance adapted for TIModel
-    TODO: not yet tested at all!!!
-
-    This is useful for finding a possible past glacier state or for sensitivity
-    experiments.
-
-    Note that this is going to be sensitive to extreme years in certain
-    periods, but it is by far more physically reasonable than other
-    approaches based on gaussian assumptions.
-    """
-
-    def __init__(self, gdir, melt_f=None, residual=0,
-                 y0=None, halfsize=15, seed=None,
-                 mb_model_sub_class = TIModel, baseline_climate=None,
-                 filename='climate_historical', input_filesuffix='default',
-                 all_years=False, unique_samples=False, **kwargs):
-        """Initialize.
-
-        Parameters
-        ----------
-        gdir : GlacierDirectory
-            the glacier directory
-        mu_star : float, optional
-            set to the alternative value of mu* you want to use
-            (the default is to use the calibrated value)
-        bias : float, optional
-            set to the alternative value of the calibration bias [mm we yr-1]
-            you want to use (the default is to use the calibrated value)
-            Note that this bias is *substracted* from the computed MB. Indeed:
-            BIAS = MODEL_MB - REFERENCE_MB.
-        y0 : int, optional, default: tstar
-            the year at the center of the period of interest. The default
-            is to use tstar as center.
-        halfsize : int, optional
-            the half-size of the time window (window size = 2 * halfsize + 1)
-        seed : int, optional
-            Random seed used to initialize the pseudo-random number generator.
-        filename : str, optional
-            set to a different BASENAME if you want to use alternative climate
-            data.
-        input_filesuffix : str
-            the file suffix of the input climate file
-        all_years : bool
-            if True, overwrites ``y0`` and ``halfsize`` to use all available
-            years.
-        unique_samples: bool
-            if true, chosen random mass-balance years will only be available
-            once per random climate period-length
-            if false, every model year will be chosen from the random climate
-            period with the same probability
-        **kwargs:
-            kyeword arguments to pass to the PastMassBalance model
-        """
-
-        super(RandomMassBalance_TIModel, self).__init__()
-        self.valid_bounds = [-1e4, 2e4]  # in m
-        #if mb_model_sub_class == TIModel_Sfc_Type:
-        #    **kwargs['check_availability'] = False
-        if mb_model_sub_class == TIModel_Sfc_Type:
-            # was not sure how to add something to **kwargs
-            kwargs2 = {'check_availability':False}
-        else:
-            kwargs2 = {}
-
-        self.mbmod = mb_model_sub_class(gdir, melt_f=melt_f, residual=residual,
-                                     filename=filename,
-                                     input_filesuffix=input_filesuffix,
-                                     baseline_climate=baseline_climate,
-                                     **kwargs, **kwargs2)
-
-        # Climate period
-        if all_years:
-            self.years = self.mbmod.years
-        else:
-            self.years = np.arange(y0-halfsize, y0+halfsize+1)
-        self.yr_range = (self.years[0], self.years[-1]+1)
-        self.ny = len(self.years)
-        self.hemisphere = gdir.hemisphere
-
-        # RandomState
-        self.rng = np.random.RandomState(seed)
-        self._state_yr = dict()
-
-        # Sampling without replacement
-        self.unique_samples = unique_samples
-        if self.unique_samples:
-            self.sampling_years = self.years
-
-        self._mb_debug_container = pd.DataFrame({'yr':[], 'ryr':[],
-                                                 'heights':[], 'mb':[]})
-
-
-    def historical_climate_qc_mod(self, gdir):
-        return self.mbmod.historical_climate_qc_mod(gdir)
-
-    @property
-    def temp_bias(self):
-        """Temperature bias to add to the original series."""
-        return self.mbmod.temp_bias
-
-    @temp_bias.setter
-    def temp_bias(self, value):
-        """Temperature bias to add to the original series."""
-        for attr_name in ['_lazy_interp_yr', '_lazy_interp_m']:
-            if hasattr(self, attr_name):
-                delattr(self, attr_name)
-        self.mbmod.temp_bias = value
-
-    @property
-    def prcp_fac(self):
-        """Precipitation factor to apply to the original series."""
-        return self.mbmod.prcp_fac
-
-    @prcp_fac.setter
-    def prcp_fac(self, value):
-        """Precipitation factor to apply to the original series."""
-        for attr_name in ['_lazy_interp_yr', '_lazy_interp_m']:
-            if hasattr(self, attr_name):
-                delattr(self, attr_name)
-        self.mbmod.prcp_fac = value
-
-    @property
-    def residual(self):
-        """Residual bias to apply to the original series."""
-        return self.mbmod.residual
-
-    @residual.setter
-    def residual(self, value):
-        """Residual bias to apply to the original series."""
-        self.mbmod.residual = value
-
-    def get_state_yr(self, year=None):
-        """For a given year, get the random year associated to it."""
-        year = int(year)
-        if year not in self._state_yr:
-            if self.unique_samples:
-                # --- Sampling without replacement ---
-                if self.sampling_years.size == 0:
-                    # refill sample pool when all years were picked once
-                    self.sampling_years = self.years
-                # choose one year which was not used in the current period
-                _sample = self.rng.choice(self.sampling_years)
-                # write chosen year to dictionary
-                self._state_yr[year] = _sample
-                # update sample pool: remove the chosen year from it
-                self.sampling_years = np.delete(
-                    self.sampling_years,
-                    np.where(self.sampling_years == _sample))
-            else:
-                # --- Sampling with replacement ---
-                self._state_yr[year] = self.rng.randint(*self.yr_range)
-        return self._state_yr[year]
-
-    def get_monthly_mb(self, heights, year=None, **kwargs):
-        ryr, m = floatyear_to_date(year)
-        ryr = date_to_floatyear(self.get_state_yr(ryr), m)
-        return self.mbmod.get_monthly_mb(heights, year=ryr, **kwargs)
-
-    def get_daily_mb(self, heights, year=None, **kwargs):
-        ryr, m = floatyear_to_date(year)
-        ryr = date_to_floatyear(self.get_state_yr(ryr), m)
-        return self.mbmod.get_daily_mb(heights, year=ryr, **kwargs)
-
-    def get_annual_mb(self, heights, year=None, **kwargs):
-        ryr = self.get_state_yr(int(year))
-        #return self.mbmod.get_annual_mb(heights, year=ryr, **kwargs)
-        # debug stuff to find out more about this problem
-        if isinstance(self.mbmod, TIModel_Sfc_Type):
-            if self.mbmod.check_availability:
-                raise InvalidWorkflowError('check availability should be false for get_annual_mb in '
-                                       'RandomMassBalance_TIModel!!! sth. goes wrong!!!')
-        _mb = self.mbmod.get_annual_mb(heights, year=ryr, **kwargs)
-        # if add_climate is True we only want to save the mb inside of the debug container!
-        if 'add_climate' in kwargs.keys():
-            if kwargs['add_climate']:
-                _mb_spec = _mb[0]
-        else:
-            _mb_spec = _mb
-        pd_out = pd.DataFrame({'yr': year, 'ryr': ryr, 'heights': heights, 'mb': _mb_spec})
-        self._mb_debug_container = self._mb_debug_container.append(pd_out)
-        return _mb

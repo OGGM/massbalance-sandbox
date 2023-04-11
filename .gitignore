@@ -19,6 +19,11 @@ examples/*checkpoints
 .ipynb_checkpoints
 *.nbgrader.log
 
+docs/preprocess_ERA5_daily
+docs/intercomparison_w_figures
+MBsandbox/massbalance_sandbox_oggm.py
+
+
 # Tests stuffs
 oggm/tests/result_images
 result_images
