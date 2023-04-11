@@ -520,6 +520,8 @@ class Test_hydro:
     def test_hydro_daily_vs_annual_from_oggm_core(self, gdir, #inversion_params,
                                     mb_run):
         '''
+
+        TODO: this does not work for OGGMv16 at the moment ...
         This checks:
          - if yearly outputs of annual mb and daily mb are the same
          - if monthly outputs of monthly mb and daily mb are the same

@@ -38,16 +38,12 @@ gpd = pytest.importorskip('geopandas')
 
 # Local imports
 import oggm
-from oggm.core import (gis, inversion, climate, centerlines,
-                       flowline, massbalance)
+
 from oggm.shop import gcm_climate
 import oggm.cfg as cfg
-from oggm import utils, tasks
-from oggm.utils import get_demo_file, tuple2int
-from oggm.tests.funcs import (get_test_dir, init_columbia, init_columbia_eb,
-                              apply_test_ref_tstars)
+from oggm import utils
+
 from oggm import workflow
-from oggm.exceptions import InvalidWorkflowError, MassBalanceCalibrationError
 ##########
 
 

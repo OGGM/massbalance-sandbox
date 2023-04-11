@@ -27,6 +27,11 @@ from MBsandbox.mbmod_daily_oneflowline import TIModel, TIModel_Sfc_Type
 from MBsandbox.flowline_TIModel import (run_from_climate_data_TIModel, run_constant_climate_TIModel,
                                         run_random_climate_TIModel)
 
+# depends on oggm version ...
+try:
+    from oggm.core.massbalance import apparent_mb_from_any_mb
+except:
+    from oggm.core.climate import apparent_mb_from_any_mb
 
 # necessary for `melt_f_calib_geod_prep_inversion`
 _doc = 'the calibrated melt_f according to the geodetic data with the ' \
@@ -2254,7 +2259,7 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
         mb_mod.reset_pd_mb_bucket()
     # Fabi?: which starting year? I set it to 2000 !!! Is this right?
     # get the apparent_mb (necessary for inversion)
-    climate.apparent_mb_from_any_mb(gdir, mb_model=mb_mod,
+    apparent_mb_from_any_mb(gdir, mb_model=mb_mod,
                                     mb_years=np.arange(2000, ye, 1))
 
     # TODO: maybe also add type of mb_model_sub_class into fs ???

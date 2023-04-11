@@ -68,7 +68,7 @@ setup(
 
         # Specify the Python versions you support here. In particular, ensure
         # that you indicate whether you support Python 2, Python 3 or both.
-        'Programming Language :: Python :: 3.7.8',
+        'Programming Language :: Python :: 3.9',
     ],
 
     # This field adds keywords for your project which will appear on the
@@ -94,8 +94,7 @@ setup(
     # For an analysis of "install_requires" vs pip's requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
 
-    # the newest oggm developer version has to be installed in order that
-    # this works
+    # OGGM v153 needs to be installed
     install_requires=[],
     # 'numpy', 'pytest', 'matplotlib', 'scipy', 'pandas',
     # 'xarray', 'netCDF4', 'shapely', 'tables', 'geopandas', 'salem',

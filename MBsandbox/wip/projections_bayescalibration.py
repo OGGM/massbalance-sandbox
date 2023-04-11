@@ -758,15 +758,15 @@ def process_isimip_data(gdir, output_filesuffix='', fpath_temp=None,
                 fpath_precip, fpath_precip_h]:
         if temporal_resol == 'monthly':
             if cluster:
-                path = '/home/www/oggm/cmip6/isimip3b/flat/monthly/'
+                path = '/home/www/oggm/cmip6/isimip3b/flat/2023.2/monthly/'
             else:
-                path = 'https://cluster.klima.uni-bremen.de/~oggm/cmip6/isimip3b/flat/monthly/'
+                path = 'https://cluster.klima.uni-bremen.de/~oggm/cmip6/isimip3b/flat/2023.2/monthly/'
             add = '_global_monthly_flat_glaciers.nc'
         elif temporal_resol == 'daily':
             if cluster:
-                path = '/home/www/oggm/cmip6/isimip3b/flat/daily/'
+                path = '/home/www/oggm/cmip6/isimip3b/flat/2023.2/daily/'
             else:
-                path = 'https://cluster.klima.uni-bremen.de/~oggm/cmip6/isimip3b/flat/daily/'
+                path = 'https://cluster.klima.uni-bremen.de/~oggm/cmip6/isimip3b/flat/2023.2/daily/'
             add = '_global_daily_flat_glaciers.nc'
 
         fpath_spec = path + '{}_w5e5_'.format(ensemble) + '{ssp}_{var}' + add
