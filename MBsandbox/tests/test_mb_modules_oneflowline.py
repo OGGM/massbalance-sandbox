@@ -965,8 +965,8 @@ class Test_geodetic_sfc_type:
         for e, y in enumerate(pd_mb_overview_sel_gdir_aletsch.Year):
             # if the actual WGMS period is longer than the default Oct1st - Apr30 period, at least precipitation
             # should be more!
-            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype(np.datetime64)[y].month < 10
-            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype(np.datetime64)[y].month > 4
+            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype('datetime64[ns]')[y].month < 10
+            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype('datetime64[ns]')[y].month > 4
             if condi_m_e and condi_m_s:
                 ### all those that are always above zero and are summed up should be larger:
                 # tfm (here it can also be equal)
@@ -978,8 +978,8 @@ class Test_geodetic_sfc_type:
 
             # if the actual WGMS period is short than the default Oct1st - Apr30 period, at least precipitation
             # should be smaller!
-            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype(np.datetime64)[y].month >= 10
-            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype(np.datetime64)[y].month <= 4
+            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype('datetime64[ns]')[y].month >= 10
+            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype('datetime64[ns]')[y].month <= 4
             if condi_m_e and condi_m_s:
                 ### all those that are always above zero and are summed up should be larger:
                 # tfm (here it can also be equal)
@@ -1226,8 +1226,8 @@ class Test_geodetic_sfc_type:
         for e, y in enumerate(pd_mb_overview_sel_gdir_aletsch.Year):
             # if the actual WGMS period is longer than the default Oct1st - Apr30 period, at least precipitation
             # should be more!
-            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype(np.datetime64)[y].month < 10
-            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype(np.datetime64)[y].month > 4
+            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype('datetime64[ns]')[y].month < 10
+            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype('datetime64[ns]')[y].month > 4
             if condi_m_e and condi_m_s:
                 ### all those that are always above zero and are summed up should be larger:
                 # tfm (here it can also be equal)
@@ -1239,8 +1239,8 @@ class Test_geodetic_sfc_type:
 
             # if the actual WGMS period is short than the default Oct1st - Apr30 period, at least precipitation
             # should be smaller!
-            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype(np.datetime64)[y].month >= 10
-            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype(np.datetime64)[y].month <= 4
+            condi_m_s = pd_mb_overview_sel_gdir_aletsch['BEGIN_PERIOD'].astype('datetime64[ns]')[y].month >= 10
+            condi_m_e = pd_mb_overview_sel_gdir_aletsch['END_WINTER'].astype('datetime64[ns]')[y].month <= 4
             if condi_m_e and condi_m_s:
                 ### all those that are always above zero and are summed up should be larger:
                 # tfm (here it can also be equal)
