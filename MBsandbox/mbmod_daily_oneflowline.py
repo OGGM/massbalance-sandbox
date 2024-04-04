@@ -3891,7 +3891,6 @@ class ConstantMassBalance_TIModel(MassBalanceModel):
                     mb = self.interp_yr(heights)
 
         pd_out = pd.DataFrame({'yr': year, 'heights': heights, 'mb': mb})
-        #self._mb_debug_container = self._mb_debug_container.append(pd_out)
         self._mb_debug_container = pd.concat([self._mb_debug_container, pd_out], ignore_index=True)
 
         if add_climate:
@@ -4577,6 +4576,5 @@ class RandomMassBalance_TIModel(MassBalanceModel):
         else:
             _mb_spec = _mb
         pd_out = pd.DataFrame({'yr': year, 'ryr': ryr, 'heights': heights, 'mb': _mb_spec})
-        #self._mb_debug_container = self._mb_debug_container.append(pd_out)
         self._mb_debug_container = pd.concat([self._mb_debug_container, pd_out], ignore_index=True)
         return _mb
