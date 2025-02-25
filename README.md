@@ -1,7 +1,12 @@
 # OGGM Mass-Balance sandbox
 
+
 Next generation of OGGM's mass-balance models. Work in process! 
 
+---
+**The OGGM mass-balance sandbox does currently not work with OGGM>=v.1.6. More info under # How to install!** 
+
+---
 
 > You are welcome to discover some new mass-balance options such as different climate resolutions or surface
 > type distinction. However, we want to make clear that this is 
@@ -15,8 +20,8 @@ Next generation of OGGM's mass-balance models. Work in process!
     as I can, they might be less rigorous as the ones from pure OGGM
 > 
 
-> The OGGM mass-balance sandbox has been used by the preprint  "Glacier projections sensitivity to temperature-index model 
-choices and calibration strategies" (Schuster et al. 2023, in review, submitted to Annals of Glaciology). We uploaded the preprint to EarthArXiv, and it is available under the DOI https://doi.org/10.31223/X5C65S. Most options are described there in details. If you use the OGGM mass-balance sandbox, please cite the preprint. The scripts to reproduce the analysis of the preprint and that use this OGGM mass-balance sandbox are here available: https://github.com/lilianschuster/oggm_mb_sandbox_option_intercomparison.  
+> The OGGM mass-balance sandbox has been used by the paper  ["Glacier projections sensitivity to temperature-index model 
+choices and calibration strategies" (Schuster et al. 2023)](https://doi.org/10.1017/aog.2023.57). Most options are described there in details. If you use the OGGM mass-balance sandbox, please cite the paper. The scripts to reproduce the analysis of the paper and that use this OGGM mass-balance sandbox are available here: https://github.com/lilianschuster/oggm_mb_sandbox_option_intercomparison.  
 > 
 > If you can't wait until the OGGM massbalance-sandbox is integrated into OGGM default and want to
 > use it already now for your specific OGGM application,
