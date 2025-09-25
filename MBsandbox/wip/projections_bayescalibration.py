@@ -1347,7 +1347,7 @@ def inversion_and_run_from_climate_with_bayes_mb_params(gdir, a_factor=1,
                 # Try to get the slope
                 mb_gradient_y, _, _, _, _ = stats.linregress(h[pab], mbz[pab])
             except:
-                mb_gradient_y = np.NaN
+                mb_gradient_y = np.nan
             mb_gradient.append(mb_gradient_y)
         mb_grad_draws_h[j] = np.array(mb_gradient).mean()
         # ds = utils.compile_run_output(gdirs, input_filesuffix='_historical_{}'.format(j))

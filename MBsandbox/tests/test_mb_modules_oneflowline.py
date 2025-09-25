@@ -2688,7 +2688,7 @@ class Test_directobs_hydro10:
     #     # real data
     #     h, w = gdir.get_inversion_flowline_hw()
     #     mbdf = gdir.get_ref_mb_data()
-    #     mbdf.loc[yr, 'MY_MB'] = np.NaN
+    #     mbdf.loc[yr, 'MY_MB'] = np.nan
     #     mb_mod = massbalance.PastMassBalance(gdir)
     #     for yr in mbdf.index.values:
     #         my_mb_on_h = mb_mod.get_annual_mb(h, yr) * SEC_IN_YEAR * rho

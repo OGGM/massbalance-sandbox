@@ -104,7 +104,7 @@ def get_slope_pf_melt_f(gd_mb, h=None, w=None, ys=None):
 
     pfs = np.array([0.5, 1, 2, 3, 4, 5, 20])
     melt_fs = np.array([5, 50, 100, 150, 200, 300, 1000])
-    pd_mb = pd.DataFrame(np.NaN, index=pfs,
+    pd_mb = pd.DataFrame(np.nan, index=pfs,
                          columns=melt_fs)
     for pf in pfs:
         for melt_f in melt_fs:
@@ -129,7 +129,7 @@ def get_slope_pf_melt_f(gd_mb, h=None, w=None, ys=None):
         assert slope_pf.std() / slope_pf.mean() < 1e-3
         assert slope_melt_f.std() / slope_melt_f.mean() < 1e-3
     # recompute it the simple way without directly using oggm get_specific_mb ...
-    pd_mb_simple = pd.DataFrame(np.NaN, index=pfs,
+    pd_mb_simple = pd.DataFrame(np.nan, index=pfs,
                                 columns=melt_fs)
     for pf in pfs:
         for melt_f in melt_fs:
