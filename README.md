@@ -4,7 +4,7 @@
 Next generation of OGGM's mass-balance models. Work in process! 
 
 ---
-**The OGGM mass-balance sandbox does currently not work with OGGM>=v.1.6. More info under # How to install! If you are here, because you want to use the daily feature or the surface-type distinction with OGGM>=v1.6, you can instead use the [OGGM dev branch](https://github.com/OGGM/oggm/tree/dev) (and OGGM v1.7 in the future) which includes these mass-balance sandbox's MB model features. ** 
+**The OGGM mass-balance sandbox does currently not work with OGGM>=v.1.6. More info under # How to install! If you are here, because you want to use the daily feature or the surface-type distinction with OGGM>=v1.6, you can instead use the [OGGM dev branch](https://github.com/OGGM/oggm/tree/dev) (and OGGM v1.7 in the future) which includes these mass-balance sandbox's MB model features.** 
 
 ---
 
