@@ -42,7 +42,7 @@ def get_opt_pf_melt_f(gd, mb_typef='mb_monthly', grad_type='cte',
                      'solid prcp mean nopf', 'solid prcp mean nopf weighted',
                      'solid prcp std nopf'
                      ])
-        pd_calib_opt.loc[gd.rgi_id] = np.NaN
+        pd_calib_opt.loc[gd.rgi_id] = np.nan
     if mb_type != 'mb_real_daily':
         if dataset == 'ERA5':
             baseline_climate = 'ERA5dr'
@@ -206,12 +206,12 @@ def get_opt_pf_melt_f(gd, mb_typef='mb_monthly', grad_type='cte',
         ###
 
         # validation: no validation right no
-        pd_calib_opt.loc[gd.rgi_id, 'prcp std valid'] = np.NaN
-        pd_calib_opt.loc[gd.rgi_id, 'solid prcp std valid'] = np.NaN
+        pd_calib_opt.loc[gd.rgi_id, 'prcp std valid'] = np.nan
+        pd_calib_opt.loc[gd.rgi_id, 'solid prcp std valid'] = np.nan
 
 
     else:
-        pd_calib_opt.loc[gd.rgi_id] = np.NaN
+        pd_calib_opt.loc[gd.rgi_id] = np.nan
         pd_calib_opt.loc[gd.rgi_id, 'amount_glacmsm'] = len(ys_glac)
         pd_calib_opt.loc[
             gd.rgi_id, 'optimisation_possible'] = 'only 1 or less msm>=1979'
@@ -238,7 +238,7 @@ def get_opt_pf_melt_f_above2000(gd, mb_type='mb_monthly', grad_type='cte',
                      'prcp mean nopf', 'solid prcp mean nopf',
                      'solid prcp std nopf'
                      ])
-        pd_calib_opt.loc[gd.rgi_id] = np.NaN
+        pd_calib_opt.loc[gd.rgi_id] = np.nan
 
     cfg.PARAMS['baseline_climate'] = 'ERA5dr'
     oggm.shop.ecmwf.process_ecmwf_data(gd, dataset='ERA5dr')
@@ -370,12 +370,12 @@ def get_opt_pf_melt_f_above2000(gd, mb_type='mb_monthly', grad_type='cte',
             pd_calib_opt.loc[
                 gd.rgi_id, 'solid prcp std valid'] = prcpsols_std_val
         else:
-            pd_calib_opt.loc[gd.rgi_id, 'prcp std valid'] = np.NaN
-            pd_calib_opt.loc[gd.rgi_id, 'solid prcp std valid'] = np.NaN
+            pd_calib_opt.loc[gd.rgi_id, 'prcp std valid'] = np.nan
+            pd_calib_opt.loc[gd.rgi_id, 'solid prcp std valid'] = np.nan
 
 
     else:
-        pd_calib_opt.loc[gd.rgi_id] = np.NaN
+        pd_calib_opt.loc[gd.rgi_id] = np.nan
         pd_calib_opt.loc[gd.rgi_id, 'glacmsm_after_2000'] = len(
             ys_glac[ys_glac >= 2000])
         pd_calib_opt.loc[gd.rgi_id, 'glacmsm_before_2000'] = len(

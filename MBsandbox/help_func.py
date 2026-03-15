@@ -573,10 +573,10 @@ def compute_stat(mb_specific=None, mbdf=None, return_dict=False,
     # this is treated a bit different than in mb_crossval of Matthias Dusch
     if ref_std == 0:
         # in mb_crossval: ref_std is then set equal to std of the modeled mb
-        quot_std = np.NaN
+        quot_std = np.nan
         # in mb_crossval: rcor is set to 1 but I guess it should not be counted
         # because it is not sth. we want to count
-        rcor = np.NaN
+        rcor = np.nan
     else:
         quot_std = mod_std/ref_std
         rcor = np.corrcoef(mb_specific, obs)[0, 1]
@@ -816,7 +816,7 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
     # sfc_type_distinction types
     n = 2
     if not sfc_type_distinction:
-        melt_f_update = np.NaN
+        melt_f_update = np.nan
         n = 1
 
     pd_geodetic_all = utils.get_geodetic_mb_dataframe()
@@ -861,7 +861,7 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
         assert np.all(yrs_seasonal_mbs >= 1980)
         assert np.all(yrs_seasonal_mbs < 2020)
     except:
-        # just take the years where annual MB exists (even if no winter MB exist)--> get np.NaN for winter_mb_observed!
+        # just take the years where annual MB exists (even if no winter MB exist)--> get np.nan for winter_mb_observed!
         yrs_seasonal_mbs = mbdf.index
         # actually it does not matter which climate input fs we use as long it exists (they all have the same time period)
     try:
@@ -878,7 +878,7 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
     #    'ANNUAL_BALANCE']
     hgts, widths = gdir.get_inversion_flowline_hw()
 
-    pd_calib = pd.DataFrame(np.NaN, index=np.arange(0, int(3 * 2 * n * len(temp_b_range))),  # *len(gdirs))),
+    pd_calib = pd.DataFrame(np.nan, index=np.arange(0, int(3 * 2 * n * len(temp_b_range))),  # *len(gdirs))),
                             columns=['rgi_id', 'temp_bias', 'pf_opt', 'melt_f',
                                      'winter_prcp_mean', 'winter_solid_prcp_mean',
                                      'specific_melt_winter_kg_m2', 'except_necessary', 'quot_std', 'mae_mb_profile',
@@ -901,7 +901,7 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
                         tau_e_fold_yr = 1
                 else:
                     melt_f_change = melt_f_change_r
-                    tau_e_fold_yr = np.NaN
+                    tau_e_fold_yr = np.nan
                 if sfc_type_distinction:
                     gd_mb = TIModel_Sfc_Type(gdir, 200,
                                              prcp_fac=1,
@@ -964,7 +964,7 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
                                           pd_pf['b_intercept'].iloc[0])
                     elif pf_cte_via == '' or pf_cte_via == '_pf_cte_via_std':
                         if not sfc_type_distinction:
-                            melt_f_change = np.NaN
+                            melt_f_change = np.nan
                             if pf_cte_dict is False:
                                 pf_cte = pf_cte_dict
                             else:
@@ -975,7 +975,7 @@ def calibrate_to_geodetic_bias_quot_std_different_temp_bias(gdir,
                             else:
                                 pf_cte = pf_cte_dict[f'{melt_f_update}_melt_f_update_sfc_type_{melt_f_change_r}_{mb_type}_{grad_type}']
                     for temp_bias in temp_b_range:
-                        pd_calib.loc[j] = np.NaN
+                        pd_calib.loc[j] = np.nan
                         try:
                             out = calibrate_to_geodetic_bias_std_quot_fast(gd_mb, method=method,
                                                                             temp_bias=temp_bias,
@@ -1295,8 +1295,8 @@ def calibrate_to_geodetic_bias_winter_mb(gdir,  # temp_b_range = np.arange(-3,3,
     # todo: optimize this that this is not called every time but just once!
     outi_prof = get_mean_mb_profile_filtered(gdir, input_fs=input_fs, obs_ratio_needed=0.6)
     if outi_prof is None:
-        # no MB profile exist -> mae has to be np.NaN
-        mae = np.NaN
+        # no MB profile exist -> mae has to be np.nan
+        mae = np.nan
     else:
         obs_mean_mb_profile_filtered, obs_mean_mb_profile_years = outi_prof
         # get modelled MB profile
@@ -1495,7 +1495,7 @@ def calibrate_to_geodetic_bias_std_quot_fast(gd_mb,  # temp_b_range = np.arange(
     try:
         melt_f_update = gd_mb.melt_f_update
     except:
-        melt_f_update = np.NaN
+        melt_f_update = np.nan
     if melt_f_update != 'annual':
         # in case of HEF this should be the same !!! (as HEF always has WGMS seasonal MB from Oct 1st to April 30th)
         try:
@@ -1535,15 +1535,15 @@ def calibrate_to_geodetic_bias_std_quot_fast(gd_mb,  # temp_b_range = np.arange(
 
             specific_melt_winter = np.average(melt_w_month_kg_m2_2d.mean(axis=1), weights=widths)
         except:
-            winter_prcp_mean = np.NaN
-            winter_solid_prcp_mean = np.NaN
-            specific_melt_winter = np.NaN
-            winter_mb_bias = np.NaN
+            winter_prcp_mean = np.nan
+            winter_solid_prcp_mean = np.nan
+            specific_melt_winter = np.nan
+            winter_mb_bias = np.nan
     else:
-        winter_prcp_mean = np.NaN
-        winter_solid_prcp_mean = np.NaN
-        specific_melt_winter = np.NaN
-        winter_mb_bias = np.NaN
+        winter_prcp_mean = np.nan
+        winter_solid_prcp_mean = np.nan
+        specific_melt_winter = np.nan
+        winter_mb_bias = np.nan
 
     # also compute quot_std
     mod_std = gd_mb.get_specific_mb(heights=hgts, widths=widths,
@@ -1557,8 +1557,8 @@ def calibrate_to_geodetic_bias_std_quot_fast(gd_mb,  # temp_b_range = np.arange(
     # observed MB profile
     # todo: optimize this that this is not called every time but just once!
     if mean_mb_prof is None:
-        # no MB profile exist -> mae has to be np.NaN
-        mae = np.NaN
+        # no MB profile exist -> mae has to be np.nan
+        mae = np.nan
     else:
         obs_mean_mb_profile_filtered, obs_mean_mb_profile_years = mean_mb_prof
         # get modelled MB profile
@@ -1785,8 +1785,8 @@ def calibrate_to_geodetic_bias_winter_mb_fast(gd_mb,  # temp_b_range = np.arange
     # observed MB profile
     # todo: optimize this that this is not called every time but just once!
     if mean_mb_prof is None:
-        # no MB profile exist -> mae has to be np.NaN
-        mae = np.NaN
+        # no MB profile exist -> mae has to be np.nan
+        mae = np.nan
     else:
         obs_mean_mb_profile_filtered, obs_mean_mb_profile_years = mean_mb_prof
         # get modelled MB profile
@@ -1824,10 +1824,10 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias(gdir,
     # sfc_type_distinction types
     n = 2
     if not sfc_type_distinction:
-        melt_f_update = np.NaN
+        melt_f_update = np.nan
         n = 1
 
-    pd_calib = pd.DataFrame(np.NaN, index=np.arange(0, int(3*2*n*len(temp_b_range))), #*len(gdirs))),
+    pd_calib = pd.DataFrame(np.nan, index=np.arange(0, int(3*2*n*len(temp_b_range))), #*len(gdirs))),
                             columns=['rgi_id', 'temp_bias', 'pf_opt', 'melt_f',
                                  'winter_prcp_mean', 'winter_solid_prcp_mean',
                                  'specific_melt_winter_kg_m2', 'except_necessary', 'quot_std', 'mae_mb_profile',
@@ -1840,9 +1840,9 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias(gdir,
                     pass
                 else:
                     if not sfc_type_distinction:
-                        melt_f_change = np.NaN
+                        melt_f_change = np.nan
                     for temp_bias in temp_b_range:
-                        pd_calib.loc[j] = np.NaN
+                        pd_calib.loc[j] = np.nan
 
                         try:
                             out = calibrate_to_geodetic_bias_winter_mb(gdir, method = method,
@@ -1892,7 +1892,7 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir,
     # sfc_type_distinction types
     n = 2
     if not sfc_type_distinction:
-        melt_f_update = np.NaN
+        melt_f_update = np.nan
         n = 1
 
     pd_geodetic_all = utils.get_geodetic_mb_dataframe()
@@ -1939,7 +1939,7 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir,
         assert np.all(yrs_seasonal_mbs >= 1980)
         assert np.all(yrs_seasonal_mbs < 2020)
     except:
-        # just take the years where annual MB exists (even if no winter MB exist)--> get np.NaN for winter_mb_observed!
+        # just take the years where annual MB exists (even if no winter MB exist)--> get np.nan for winter_mb_observed!
         yrs_seasonal_mbs = mbdf.index
         # actually it does not matter which climate input fs we use as long it exists (they all have the same time period)
     try:
@@ -1954,7 +1954,7 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir,
 
     hgts, widths = gdir.get_inversion_flowline_hw()
 
-    pd_calib = pd.DataFrame(np.NaN, index=np.arange(0, int(3*2*n*len(temp_b_range))), #*len(gdirs))),
+    pd_calib = pd.DataFrame(np.nan, index=np.arange(0, int(3*2*n*len(temp_b_range))), #*len(gdirs))),
                             columns=['rgi_id', 'temp_bias', 'pf_opt', 'melt_f',
                                  'winter_prcp_mean', 'winter_solid_prcp_mean',
                                  'specific_melt_winter_kg_m2', 'except_necessary', 'quot_std', 'mae_mb_profile',
@@ -1976,7 +1976,7 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir,
                         tau_e_fold_yr = 1
                 else:
                     melt_f_change = melt_f_change_r
-                    tau_e_fold_yr = np.NaN
+                    tau_e_fold_yr = np.nan
                 if sfc_type_distinction:
                     gd_mb = TIModel_Sfc_Type(gdir, 200,
                                              prcp_fac=1,
@@ -2003,9 +2003,9 @@ def calibrate_to_geodetic_bias_winter_mb_different_temp_bias_fast(gdir,
                     pass
                 else:
                     if not sfc_type_distinction:
-                        melt_f_change = np.NaN
+                        melt_f_change = np.nan
                     for temp_bias in temp_b_range:
-                        pd_calib.loc[j] = np.NaN
+                        pd_calib.loc[j] = np.nan
 
                         try:
                             out = calibrate_to_geodetic_bias_winter_mb_fast(gd_mb, method = method,
@@ -2194,7 +2194,7 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
             end = max_height_change_for_corr
 
         steps = np.arange(start, start + end, step, dtype=np.int64)
-        melt_f_candidates = steps * np.NaN
+        melt_f_candidates = steps * np.nan
         for i, ref_h in enumerate(steps):
             with utils.ncDataset(fpath, 'a') as nc:
                 nc.ref_hgt = ref_h
@@ -2216,7 +2216,7 @@ def melt_f_calib_geod_prep_inversion(gdir, mb_type='mb_monthly', grad_type='cte'
 
 
             except ValueError or TypeError:
-                melt_f = np.NaN
+                melt_f = np.nan
                 # Done - store for later
             melt_f_candidates[i] = melt_f
             # @Fabi, if we find one working melt_f we can actually stop
@@ -2316,7 +2316,7 @@ def minimize_winter_mb_brentq_geod_via_pf(x, gd_mb=None, mb_geodetic=None, mb_gl
         return np.absolute(bias)
 
 
-def calib_inv_run(gdir=np.NaN, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'linear',
+def calib_inv_run(gdir=np.nan, kwargs_for_TIModel_Sfc_Type={'melt_f_change': 'linear',
                                                             'tau_e_fold_yr': 0.5,
                                                             'spinup_yrs': 6,
                                                             'melt_f_update': 'annual',

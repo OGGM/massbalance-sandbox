@@ -1087,13 +1087,13 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False,
                 'snowfall_off_glacier', 'snowfall_on_glacier']
         if days_in_year == 365:
             for var in vars:
-                out[var]['data'][i, -1] = np.NaN
+                out[var]['data'][i, -1] = np.nan
                 if Testing == True:
                     # this is basically just for testing (to see whether monthly volumes of daily and monthly mb match
                     # don't use it for the real version
                     #only works if sm = 1
                     out[var]['data'][i, :] = np.concatenate(
-                        (out[var]['data'][i, :59], np.array([np.NaN]), out[var]['data'][i, 59:-1]))
+                        (out[var]['data'][i, :59], np.array([np.nan]), out[var]['data'][i, 59:-1]))
 
     # Convert to xarray
     out_vars = cfg.PARAMS['store_diagnostic_variables']
@@ -1132,15 +1132,15 @@ def run_with_hydro_daily(gdir, run_task=None, ref_area_from_y0=False,
                     ods[varname] = ('time', data[:, 0])
                 else:
                     # Last year is never good
-                    data[-1, :] = np.NaN
+                    data[-1, :] = np.nan
                     var_annual = np.nansum(data, axis=1)
-                    var_annual[-1] = np.NaN
+                    var_annual[-1] = np.nan
                     ods[varname] = ('time', var_annual)
             # Then the daily ones
             ods[varname + '_daily'] = (('time', 'day_2d'), data)
         else:
             assert varname != 'snow_bucket'
-            data[-1] = np.NaN
+            data[-1] = np.nan
             ods[varname] = ('time', data)
         # for k, v in d.items():
         #     ods[varname].attrs[k] = v

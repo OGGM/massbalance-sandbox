@@ -1103,7 +1103,7 @@ class TIModel_Parent(MassBalanceModel):
             if self.mb_type == 'mb_real_daily' or self.mb_type == 'mb_monthly':
                 # even if there is temp_std inside the dataset, we won't use
                 # it for these mb_types
-                self.temp_std = np.NaN
+                self.temp_std = np.nan
             else:
                 try:
                     if temp_std_const_from_hist:
@@ -1167,7 +1167,7 @@ class TIModel_Parent(MassBalanceModel):
                                        columns=['year'])
                 pd_test.index = xr_nc.time.to_series().values
                 pd_test['month'] = xr_nc.time.to_series().dt.month.values
-                pd_test['hydro_year'] = np.NaN
+                pd_test['hydro_year'] = np.nan
 
                 if hydro_month_start == 1:
                     # hydro_year corresponds to normal year
@@ -1659,7 +1659,7 @@ class TIModel_Parent(MassBalanceModel):
                 tempformelt_with_std = tempformelt_daily.mean(axis=0).T
             else:
                 shape_tfm = np.shape(tempformelt_without_std)
-                tempformelt_with_std = np.full(shape_tfm, np.NaN)
+                tempformelt_with_std = np.full(shape_tfm, np.nan)
                 for h in np.arange(0, np.shape(tempformelt_without_std)[0]):
                     h_tfm_daily_ = np.atleast_2d(tempformelt_without_std[h, :])
                     h_tempformelt_daily = h_tfm_daily_ + z_std
@@ -2255,7 +2255,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
                  melt_f_change='linear',
                  check_availability=True,
                  interpolation_optim=False,
-                 hbins=np.NaN,
+                 hbins=np.nan,
                  **kwargs):
 
         # doc_TIModel_Sfc_Type =
@@ -2288,7 +2288,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
             it describes how fast the snow melt
             factor approximates to the ice melt factor via
             melt_f = melt_f_ice + (melt_f_snow - melt_f_ice)* np.exp(-time_yr/tau_e_fold_yr) # s: in months
-            do not set to 0, otherwise the melt_f of the first bucket is np.NaN
+            do not set to 0, otherwise the melt_f of the first bucket is np.nan
         melt_f_change : str
             default is linear,
             how the snow melt factor changes to the ice melt factor, either 'linear'
@@ -2305,7 +2305,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
              ... as we need to use an emulation anyway this is deprecated (but was once used for equilibration runs)
              todo: maybe remove?
         hbins:
-            default is np.NaN. Here you can set different height bins for the sfc type distinction method.
+            default is np.nan. Here you can set different height bins for the sfc type distinction method.
             Best is to keep it at the default. Only necessary when using e.g. ConstantMBModel
             todo: which other specific things?
         kwargs:
@@ -2757,7 +2757,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
 
 
         new: I removed a loop here because I can just rename the bucket column names in order that they are
-        one bucket older, then set the first_snow_bucket to 0, and the set pd_bucket[kg/m2] to np.NaN
+        one bucket older, then set the first_snow_bucket to 0, and the set pd_bucket[kg/m2] to np.nan
         just want to shift all buckets from one column to another one .> can do all at once via self.buckets[::-1].iloc[1:] ???
         """
         # first convert pd_bucket to np dataframe -> at the end reconvert to pd.DataFrame
@@ -2788,8 +2788,8 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # exectime: <0.1%
         np_updated_bucket = np.concatenate([np.zeros(len_h).reshape(len_h, 1),  # first bucket should be zero
                                             pd_bucket_val_old,
-                                            np.full((len_h, 1), np.NaN)],  # kg/m2 bucket should be np.NaN
-                                            axis=1)  # , np.NaN(len(self.pd_bucket.index))])
+                                            np.full((len_h, 1), np.nan)],  # kg/m2 bucket should be np.nan
+                                            axis=1)  # , np.nan(len(self.pd_bucket.index))])
         # as we add a zero array in the front, we don't have any snow more, what has been in the youngest bucket
         # went into the next older bucket and so on!!!
 
@@ -2814,7 +2814,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         # self.pd_bucket[self.buckets[1:]] = self.pd_bucket[self.buckets[:-1]].values
 
         # self.pd_bucket[self.first_snow_bucket] = 0
-        # self.pd_bucket['delta_kg/m2'] = np.NaN
+        # self.pd_bucket['delta_kg/m2'] = np.nan
 
         # the new version should work as the old version (e.g. this test here should check it: test_sfc_type_update)
         # the other loop version will be removed
@@ -2832,7 +2832,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         #             # (if annual update there is only one snow bucket)
         #             self.pd_bucket[b] = 0
         #     # reset delta_kg/m2 to make clear that it is updated
-        #     self.pd_bucket['delta_kg/m2'] = np.NaN
+        #     self.pd_bucket['delta_kg/m2'] = np.nan
 
     def get_annual_mb(self, heights, year=None, unit='m_of_ice',
                       bucket_output=False, spinup=True,
@@ -3282,7 +3282,7 @@ class TIModel_Sfc_Type(TIModel_Parent):
         #        self.get_annual_mb([b0, b1], year=year, **kwargs))) or
         #        (self.get_annual_mb([b0], year=year, **kwargs)[0] > 0) or
         #        (self.get_annual_mb([b1], year=year, **kwargs)[0] < 0)):
-        #    return np.NaN
+        #    return np.nan
 
         def to_minimize(x):
             return (self.get_annual_mb([x], year=year, **kwargs)[0] *
@@ -4189,7 +4189,7 @@ def compile_fixed_geometry_mass_balance_TIModel(gdirs, filesuffix='',
 
     for idx, s in enumerate(out_df):
         if s is None:
-            out_df[idx] = pd.Series(np.NaN)
+            out_df[idx] = pd.Series(np.nan)
 
     out = pd.concat(out_df, axis=1, keys=[gd.rgi_id for gd in gdirs])
     out = out.dropna(axis=0, how='all')
