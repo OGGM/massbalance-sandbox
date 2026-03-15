@@ -1770,16 +1770,16 @@ class TIModel_Parent(MassBalanceModel):
             pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == self.fl.rgi_id]
             pd_mb_overview_sel_gdir_yr = pd_mb_overview_sel_gdir.loc[pd_mb_overview_sel_gdir.Year == year]
             ### starting period
-            m_start = pd_mb_overview_sel_gdir_yr['BEGIN_PERIOD'].astype(np.datetime64).iloc[0].month
-            d_start = pd_mb_overview_sel_gdir_yr['BEGIN_PERIOD'].astype(np.datetime64).iloc[0].day
-            m_start_days_in_month = pd_mb_overview_sel_gdir_yr['BEGIN_PERIOD'].astype(np.datetime64).iloc[0].days_in_month
+            m_start = pd_mb_overview_sel_gdir_yr['BEGIN_PERIOD'].astype('datetime64[ns]').iloc[0].month
+            d_start = pd_mb_overview_sel_gdir_yr['BEGIN_PERIOD'].astype('datetime64[ns]').iloc[0].day
+            m_start_days_in_month = pd_mb_overview_sel_gdir_yr['BEGIN_PERIOD'].astype('datetime64[ns]').iloc[0].days_in_month
             # ratio of 1st month that we want to estimate?
             # if d_start is 1 -> ratio should be 1 --> the entire month should be added to the winter MB
             ratio_m_start = 1 - (d_start-1)/m_start_days_in_month
             ### end period
-            m_end = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype(np.datetime64).iloc[0].month + 1
-            m_end_days_in_month = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype(np.datetime64).iloc[0].days_in_month
-            d_end = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype(np.datetime64).iloc[0].day
+            m_end = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype('datetime64[ns]').iloc[0].month + 1
+            m_end_days_in_month = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype('datetime64[ns]').iloc[0].days_in_month
+            d_end = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype('datetime64[ns]').iloc[0].day
             # ratio of last month that we want to estimate?
             # if d_end == m_end_days_in_month, then the entire month should be used
             ratio_m_end = d_end/m_end_days_in_month
@@ -1960,16 +1960,16 @@ class TIModel_Parent(MassBalanceModel):
             pd_mb_overview_sel_gdir = pd_mb_overview.loc[pd_mb_overview.rgi_id == self.fl.rgi_id]
             pd_mb_overview_sel_gdir_yr = pd_mb_overview_sel_gdir.loc[pd_mb_overview_sel_gdir.Year == year]
             ### starting period
-            m_start = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype(np.datetime64).iloc[0].month
-            d_start = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype(np.datetime64).iloc[0].day
-            m_start_days_in_month = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype(np.datetime64).iloc[0].days_in_month
+            m_start = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype('datetime64[ns]').iloc[0].month
+            d_start = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype('datetime64[ns]').iloc[0].day
+            m_start_days_in_month = pd_mb_overview_sel_gdir_yr['END_WINTER'].astype('datetime64[ns]').iloc[0].days_in_month
             # ratio of 1st month that we want to estimate?
             # if d_start is 1 -> ratio should be 1 --> the entire month should be added to the winter MB
             ratio_m_start = 1 - (d_start - 1) / m_start_days_in_month
             ### end period
-            m_end = pd_mb_overview_sel_gdir_yr['END_PERIOD'].astype(np.datetime64).iloc[0].month + 1
-            m_end_days_in_month = pd_mb_overview_sel_gdir_yr['END_PERIOD'].astype(np.datetime64).iloc[0].days_in_month
-            d_end = pd_mb_overview_sel_gdir_yr['END_PERIOD'].astype(np.datetime64).iloc[0].day
+            m_end = pd_mb_overview_sel_gdir_yr['END_PERIOD'].astype('datetime64[ns]').iloc[0].month + 1
+            m_end_days_in_month = pd_mb_overview_sel_gdir_yr['END_PERIOD'].astype('datetime64[ns]').iloc[0].days_in_month
+            d_end = pd_mb_overview_sel_gdir_yr['END_PERIOD'].astype('datetime64[ns]').iloc[0].day
             # ratio of last month that we want to estimate?
             # if d_end == m_end_days_in_month, then the entire month should be used
             ratio_m_end = d_end / m_end_days_in_month
@@ -3891,7 +3891,7 @@ class ConstantMassBalance_TIModel(MassBalanceModel):
                     mb = self.interp_yr(heights)
 
         pd_out = pd.DataFrame({'yr': year, 'heights': heights, 'mb': mb})
-        self._mb_debug_container = self._mb_debug_container.append(pd_out)
+        self._mb_debug_container = pd.concat([self._mb_debug_container, pd_out], ignore_index=True)
 
         if add_climate:
             t, tmelt, prcp, prcpsol = self.get_annual_climate(heights)
@@ -4576,5 +4576,5 @@ class RandomMassBalance_TIModel(MassBalanceModel):
         else:
             _mb_spec = _mb
         pd_out = pd.DataFrame({'yr': year, 'ryr': ryr, 'heights': heights, 'mb': _mb_spec})
-        self._mb_debug_container = self._mb_debug_container.append(pd_out)
+        self._mb_debug_container = pd.concat([self._mb_debug_container, pd_out], ignore_index=True)
         return _mb
